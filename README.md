@@ -85,7 +85,7 @@ OkHttp, JSch. Каталог SDK задаётся в `local.properties` (`sdk.di
 предлагает обновление. Можно скачать APK прямо из приложения и открыть
 системный установщик. Android попросит разрешить установку из этого приложения.
 
-- репозиторий: `https://github.com/inFernan/opencode-client-by-infernan`;
+- репозиторий: `https://github.com/AmShaegar-dev/opencode-client-by-infernan`;
 - проверка идёт через GitHub Releases API;
 - в релизе должен быть прикреплён `.apk`-файл;
 - если APK не прикреплён, приложение откроет страницу релиза в браузере;

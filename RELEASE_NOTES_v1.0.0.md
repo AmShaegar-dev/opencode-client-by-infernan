@@ -30,10 +30,10 @@ SHA-256 сертификата:
 `d8676748b575bd9de70f45cda287c35bed7e1e0a90345583a9e0a28f22034066`
 
 SHA-256 APK:
-`560D94F32DBC07567F991914214CBD51C353AB63529F5A89F6E5F62FC922C472`
+`AF62B0356A698BE21C12CEA22BF0B180ABBF26ADC4FE3E0DFAB4698535E1BD12`
 
 ## Проверка обновлений
 
 Приложение проверяет
-`https://github.com/inFernan/opencode-client-by-infernan/releases/latest`
+`https://github.com/AmShaegar-dev/opencode-client-by-infernan/releases/latest`
 не чаще одного раза в сутки и предлагает установить APK из релиза.

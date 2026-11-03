@@ -24,7 +24,7 @@ data class AppUpdate(
  */
 object UpdateChecker {
 
-    const val GITHUB_OWNER = "inFernan"
+    const val GITHUB_OWNER = "AmShaegar-dev"
     const val GITHUB_REPO = "opencode-client-by-infernan"
     const val PROJECT_URL = "https://github.com/$GITHUB_OWNER/$GITHUB_REPO"
 
