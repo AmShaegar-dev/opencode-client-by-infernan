@@ -1,0 +1,25 @@
+# Gradle / Android
+.gradle/
+.kotlin/
+build/
+app/build/
+captures/
+.idea/
+*.iml
+local.properties
+
+# Release artifacts and signing
+dist/
+*.apk
+*.aab
+*.jks
+*.keystore
+keystore.properties
+signing.properties
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local mock logs
+tools/mock-*.txt

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <color name="app_bg">#0A0A0B</color>
+    <color name="app_bg_dark">#050506</color>
+    <color name="ic_launcher_background">#0A0A0B</color>
+
+    <style name="Theme.OpenCode" parent="android:Theme.Material.NoActionBar">
+        <item name="android:colorPrimary">@color/app_bg</item>
+        <item name="android:colorPrimaryDark">@color/app_bg_dark</item>
+        <item name="android:colorAccent">#F5A524</item>
+        <item name="android:windowBackground">@color/app_bg</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+
+</resources>

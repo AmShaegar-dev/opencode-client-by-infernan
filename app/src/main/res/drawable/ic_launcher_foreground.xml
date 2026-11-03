@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Чат-пузырь -->
+    <path
+        android:fillColor="#F5A524"
+        android:pathData="M30,26h48a10,10 0 0 1 10,10v28a10,10 0 0 1 -10,10h-24l-14,12v-12h-10a10,10 0 0 1 -10,-10v-28a10,10 0 0 1 10,-10z" />
+
+    <!-- Символ терминала -->
+    <path
+        android:fillColor="#0A0A0B"
+        android:pathData="M41,41l12,9l-12,9v-6l6,-3l-6,-3z" />
+    <path
+        android:fillColor="#0A0A0B"
+        android:pathData="M57,56h14v5h-14z" />
+
+</vector>
