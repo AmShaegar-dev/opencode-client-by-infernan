@@ -1,5 +1,6 @@
 ﻿package ru.opencode.mobile.net
 
+import okhttp3.Call
 import okhttp3.CertificatePinner
 import okhttp3.Credentials
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -48,6 +49,32 @@ class OpenCodeApi(
 ) {
 
     fun info(): JSONObject = JSONObject(get("/api/info"))
+
+    /**
+     * Долгоживущее SSE-соединение `/api/event`.
+     * Возвращает Call, чтобы его можно было отменить при уходе из чата.
+     */
+    fun eventCall(): Call {
+        val base = try {
+            urlProvider().trimEnd('/')
+        } catch (e: Exception) {
+            throw OpenCodeException(0, e.message ?: "Не удалось открыть SSH-туннель")
+        }
+        val url = try {
+            (base + "/api/event").toHttpUrl()
+        } catch (e: Exception) {
+            throw OpenCodeException(0, "Некорректный адрес OpenCode: $base")
+        }
+        val builder = Request.Builder()
+            .url(url)
+            .get()
+            .header("Accept", "text/event-stream")
+            .header("User-Agent", "OpenCode-Client-by-inFernan")
+        if (password.isNotEmpty()) {
+            builder.header("Authorization", Credentials.basic("opencode", password))
+        }
+        return client.newCall(builder.build())
+    }
 
     fun sessions(search: String = ""): List<SessionInfo> {
         val query = buildString {

@@ -116,6 +116,18 @@ object Attachments {
         }
     }
 
+    /**
+     * Вложение, которое уже лежит на сервере. OpenCode умеет читать `file://`
+     * и сам подтягивает байты, поэтому в сообщении это выглядит как обычный
+     * прикреплённый файл, а не как голая строка с путём.
+     */
+    fun serverFile(path: String, name: String, sizeBytes: Long = 0L): PromptAttachment =
+        PromptAttachment(
+            uri = "file://" + Uri.encode(path, "/"),
+            name = name,
+            sizeBytes = sizeBytes
+        )
+
     /** MIME только для типов, которые OpenCode умеет принимать. */
     private fun mimeFor(name: String, declared: String?): String? {
         val extension = name.substringAfterLast('.', "").lowercase()

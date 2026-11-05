@@ -140,19 +140,32 @@ fun ChatScreen(vm: AppViewModel, server: ServerProfile, modifier: Modifier = Mod
 
     fun toast(message: String) = Toast.makeText(context, message, Toast.LENGTH_LONG).show()
 
-    fun uploadAndInsert(uri: Uri) {
-        vm.uploadToServer(server, uri) { result ->
-            result
-                .onSuccess { path ->
-                    val note = if (input.isBlank()) {
-                        "Файл загружен на сервер: $path"
-                    } else {
-                        "$input\n\nФайл загружен на сервер: $path"
+    fun uploadServerFile(uri: Uri, attachToMessage: Boolean, knownSize: Long? = null) {
+        scope.launch {
+            val name = withContext(Dispatchers.IO) {
+                Attachments.displayName(context, uri)
+            } ?: "file"
+            val size = knownSize ?: withContext(Dispatchers.IO) {
+                Attachments.sizeOf(context, uri)
+            }
+            vm.uploadToServer(server, uri) { result ->
+                result
+                    .onSuccess { path ->
+                        if (attachToMessage && (size == null || size <= Attachments.MAX_BYTES)) {
+                            attachments = attachments + Attachments.serverFile(path, name, size ?: 0L)
+                            toast("Файл прикреплён с сервера")
+                        } else {
+                            val note = if (input.isBlank()) {
+                                "Файл на сервере: $path"
+                            } else {
+                                "$input\n\nФайл на сервере: $path"
+                            }
+                            input = note
+                            toast("Файл загружен: $path")
+                        }
                     }
-                    input = note
-                    toast("Файл загружен: $path")
-                }
-                .onFailure { toast(it.message ?: "Не удалось загрузить файл") }
+                    .onFailure { toast(it.message ?: "Не удалось загрузить файл") }
+            }
         }
     }
 
@@ -165,16 +178,16 @@ fun ChatScreen(vm: AppViewModel, server: ServerProfile, modifier: Modifier = Mod
                 val size = withContext(Dispatchers.IO) { Attachments.sizeOf(context, uri) }
                 if (size != null && size > Attachments.MAX_BYTES) {
                     attaching = false
-                    toast("Файл больше 20 МБ — загружаю на сервер…")
-                    uploadAndInsert(uri)
+                    toast("Файл больше 20 МБ — загружаю на сервер и подставлю путь…")
+                    uploadServerFile(uri, attachToMessage = false, knownSize = size)
                     return@launch
                 }
                 val attachment = withContext(Dispatchers.IO) { Attachments.prepare(context, uri) }
                 attaching = false
                 when {
                     attachment == null -> {
-                        toast("Не удалось приложить к сообщению — загружаю файл на сервер…")
-                        uploadAndInsert(uri)
+                        toast("Файл не проходит как вложение — загружаю на сервер и прикрепляю…")
+                        uploadServerFile(uri, attachToMessage = true, knownSize = size)
                     }
                     attachments.size >= 5 -> toast("Можно прикрепить до 5 файлов")
                     else -> attachments = attachments + attachment
@@ -186,7 +199,7 @@ fun ChatScreen(vm: AppViewModel, server: ServerProfile, modifier: Modifier = Mod
     val uploadLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri ->
-        if (uri != null) uploadAndInsert(uri)
+        if (uri != null) uploadServerFile(uri, attachToMessage = true)
     }
 
     val exportLauncher = rememberLauncherForActivityResult(
@@ -199,7 +212,10 @@ fun ChatScreen(vm: AppViewModel, server: ServerProfile, modifier: Modifier = Mod
         }
     }
 
-    LaunchedEffect(chat.messages.size, chat.sending) {
+    val lastStreamLength = chat.messages.lastOrNull()?.let {
+        it.text.length + it.reasoning.length + it.tools.size
+    } ?: 0
+    LaunchedEffect(chat.messages.size, chat.sending, lastStreamLength) {
         if (chat.messages.isNotEmpty()) {
             runCatching { listState.animateScrollToItem(chat.messages.lastIndex) }
         }
@@ -351,7 +367,7 @@ fun ChatScreen(vm: AppViewModel, server: ServerProfile, modifier: Modifier = Mod
             ) {
                 Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(chat.error, color = Red, fontSize = 12.sp, modifier = Modifier.weight(1f))
-                    TextButton(onClick = { vm.loadChat(server, chat.sessionId) }) {
+                    TextButton(onClick = { vm.refreshMessages(server) }) {
                         Text("Обновить", color = Accent, fontSize = 12.sp)
                     }
                 }
@@ -391,6 +407,9 @@ fun ChatScreen(vm: AppViewModel, server: ServerProfile, modifier: Modifier = Mod
                         Spacer(Modifier.width(8.dp))
                         Text("Модель думает…", color = TextMuted, fontSize = 12.sp)
                         Spacer(Modifier.weight(1f))
+                        TextButton(onClick = { vm.refreshMessages(server) }) {
+                            Text("Обновить", color = Accent, fontSize = 12.sp)
+                        }
                         TextButton(onClick = { vm.stop(server) }) {
                             Text("Остановить", color = Red, fontSize = 12.sp)
                         }
@@ -902,8 +921,17 @@ private fun MessageItem(message: ChatMessage, isLast: Boolean, sending: Boolean)
         return
     }
 
-    var reasoningOpen by remember(message.id) { mutableStateOf(false) }
+    var reasoningOpen by remember(message.id) {
+        mutableStateOf(!message.completed && message.reasoning.isNotBlank())
+    }
     var toolsOpen by remember(message.id) { mutableStateOf(false) }
+
+    // Пока модель размышляет, показываем поток размышлений раскрытым.
+    LaunchedEffect(sending, message.completed, message.reasoning.isNotBlank()) {
+        if (sending && !message.completed && message.reasoning.isNotBlank()) {
+            reasoningOpen = true
+        }
+    }
 
     Surface(
         color = Surface1,

@@ -117,6 +117,8 @@ Adb shell settings put global animator_duration_scale 0 | Out-Null
 Adb shell am force-stop ru.opencode.mobile | Out-Null
 
 Adb push $apkLocal /data/local/tmp/app-debug.apk | Out-Null
+# Удаляем старую подпись (release/debug), иначе install -r может молча не обновиться.
+Adb shell pm uninstall ru.opencode.mobile | Out-Null
 Adb shell pm install -r /data/local/tmp/app-debug.apk | Out-Null
 Adb shell pm clear ru.opencode.mobile | Out-Null
 Adb logcat -c | Out-Null

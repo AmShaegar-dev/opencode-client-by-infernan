@@ -11,6 +11,7 @@ const now = () => Date.now() / 1000;
 const sessions = new Map();
 const order = [];
 const prompts = new Map();
+const sseClients = new Set();
 /** Сохранённые аккаунты провайдеров: ключи и OAuth-токены. */
 const credentials = [];
 /** Начатые OAuth-попытки: attemptID -> {integrationID, mode, created, status, message, code}. */
@@ -203,6 +204,42 @@ function send(res, status, payload) {
   res.end(body);
 }
 
+function sendSse(event) {
+  const line = "data: " + JSON.stringify(event) + "\n\n";
+  for (const client of sseClients) {
+    try { client.write(line); } catch { sseClients.delete(client); }
+  }
+}
+
+function sse(type, data) {
+  sendSse({ id: "evt_" + crypto.randomBytes(5).toString("hex"), created: now(), type, data });
+}
+
+function streamAssistant(sessionID, assistantMessageID, text) {
+  setTimeout(() => {
+    sse("session.step.started", {
+      sessionID,
+      assistantMessageID,
+      agent: "build",
+      model: { id: "free-model", providerID: "mock" },
+      started: Date.now(),
+    });
+    const reasoning = "Размышление mock-модели над запросом.";
+    sse("session.reasoning.started", { sessionID, assistantMessageID, ordinal: 0 });
+    for (const chunk of reasoning.match(/.{1,3}/g) || []) {
+      sse("session.reasoning.delta", { sessionID, assistantMessageID, ordinal: 0, delta: chunk });
+    }
+    sse("session.reasoning.ended", { sessionID, assistantMessageID, ordinal: 0, text: reasoning });
+    sse("session.text.started", { sessionID, assistantMessageID, ordinal: 0 });
+    const answer = "Эхо: " + text;
+    for (const chunk of answer.match(/.{1,2}/g) || []) {
+      sse("session.text.delta", { sessionID, assistantMessageID, ordinal: 0, delta: chunk });
+    }
+    sse("session.text.ended", { sessionID, assistantMessageID, ordinal: 0, text: answer });
+    setTimeout(() => sse("session.idle", { sessionID }), 250);
+  }, 120);
+}
+
 function handle(req, res, body) {
   const url = new URL(req.url, "http://localhost");
   const path = url.pathname;
@@ -216,6 +253,30 @@ function handle(req, res, body) {
 
   if (method === "GET" && path === "/api/info") {
     return send(res, 200, { version: "2.0.0-mock", name: "opencode" });
+  }
+
+  if (method === "GET" && path === "/api/event") {
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache, no-transform",
+      "X-Accel-Buffering": "no",
+      Connection: "keep-alive",
+    });
+    res.write("data: " + JSON.stringify({
+      id: "evt_connected",
+      created: now(),
+      type: "server.connected",
+      data: {},
+    }) + "\n\n");
+    sseClients.add(res);
+    const heartbeat = setInterval(() => {
+      try { res.write(": heartbeat\n\n"); } catch { /* ignore */ }
+    }, 15000);
+    res.on("close", () => {
+      clearInterval(heartbeat);
+      // Клиент удалится при следующей неудачной записи.
+    });
+    return;
   }
 
   if (method === "GET" && path === "/api/session") {
@@ -259,7 +320,9 @@ function handle(req, res, body) {
     const text = (json && json.text) || "";
     const t = now();
     s.messages.push({ id: "msg_u_" + crypto.randomBytes(4).toString("hex"), type: "user", time: { created: t }, text });
-    s.messages.push(assistantMessage(s.id, "Эхо: " + text, false));
+    const assistant = assistantMessage(s.id, "Эхо: " + text, false);
+    s.messages.push(assistant);
+    streamAssistant(s.id, assistant.id, text);
     prompts.set(s.id, t);
     s.time.updated = t;
     if (s.title === "Новый чат") s.title = text.slice(0, 40);

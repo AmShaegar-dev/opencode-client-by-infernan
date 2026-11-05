@@ -18,6 +18,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import okhttp3.Call
 import org.json.JSONArray
 import org.json.JSONObject
 import ru.opencode.mobile.data.ChatJson
@@ -40,10 +41,12 @@ import ru.opencode.mobile.data.ServerProfile
 import ru.opencode.mobile.data.ServerStatus
 import ru.opencode.mobile.data.ServersStore
 import ru.opencode.mobile.data.SessionInfo
+import ru.opencode.mobile.data.ToolCall
 import ru.opencode.mobile.data.UpdateChecker
 import ru.opencode.mobile.data.UsageLimitsInfo
 import ru.opencode.mobile.net.ConnectionHub
 import ru.opencode.mobile.net.OpenCodeApi
+import ru.opencode.mobile.net.OpenCodeException
 import ru.opencode.mobile.net.ServerStorageCommands
 import ru.opencode.mobile.net.Ssh
 import ru.opencode.mobile.net.SshTarget
@@ -97,6 +100,16 @@ data class DiffUi(
     val loading: Boolean = false,
     val items: List<FileDiffInfo> = emptyList(),
     val error: String = ""
+)
+
+private data class StreamPart(
+    val texts: MutableMap<Int, StringBuilder> = sortedMapOf(),
+    val reasonings: MutableMap<Int, StringBuilder> = sortedMapOf(),
+    val tools: LinkedHashMap<String, ToolCall> = LinkedHashMap(),
+    var modelLabel: String = "",
+    var created: Long = 0L,
+    var completed: Boolean = false,
+    var error: String = ""
 )
 
 data class UpdateUi(
@@ -246,6 +259,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private var chatLoadJob: Job? = null
     private var oauthJob: Job? = null
     private var oauthBridge: Ssh.LocalBridge? = null
+    private var streamJob: Job? = null
+    private var streamCall: Call? = null
+    private var streamSessionId: String = ""
+    private var streamSupported = true
+    @Volatile private var streamAlive = false
+    private val streamParts = mutableMapOf<String, StreamPart>()
 
     /** Сериализует чтение/запись opencode.json: параллельные переключатели теряли изменения. */
     private val configMutex = Mutex()
@@ -259,6 +278,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun navigate(next: Screen) {
         if (screen == next) return
+        if (screen is Screen.Chat && next !is Screen.Chat) stopEventStream()
         backStack.addLast(screen)
         while (backStack.size > 32) backStack.removeFirst()
         screen = next
@@ -277,6 +297,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         pollJob?.cancel()
         pollJob = null
         if (previous != null) {
+            if (previous !is Screen.Chat) stopEventStream()
             screen = previous
             if (previous is Screen.Chats) {
                 chatLoadJob?.cancel()
@@ -286,6 +307,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
 
         // История пуста — ведём себя как кнопка «Назад» в настольной навигации.
+        if (screen !is Screen.Chat) stopEventStream()
         return when (val current = screen) {
             Screen.Servers -> false
             is Screen.Chats -> {
@@ -296,6 +318,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
             is Screen.Chat -> {
                 backStack.clear()
+                stopEventStream()
                 screen = Screen.Chats(current.serverId)
                 chatLoadJob?.cancel()
                 serverById(current.serverId)?.let { refreshSessions(it) }
@@ -809,6 +832,303 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * Открывает SSE-поток OpenCode и обновляет сообщения по мере появления
+     * текста, размышлений и вызовов инструментов. Polling остаётся резервом.
+     */
+    private fun startEventStream(server: ServerProfile, sessionId: String) {
+        if (!streamSupported || sessionId.isBlank()) return
+        if (streamSessionId == sessionId && streamJob?.isActive == true) return
+        stopEventStream()
+        streamSessionId = sessionId
+        streamParts.clear()
+        streamJob = viewModelScope.launch(Dispatchers.IO) {
+            var failures = 0
+            while (isActive && streamSessionId == sessionId) {
+                var call: Call? = null
+                try {
+                    call = hub.api(server).eventCall()
+                    streamCall = call
+                    val response = call.execute()
+                    if (!response.isSuccessful) {
+                        val code = response.code
+                        response.close()
+                        if (code == 404 || code == 405) {
+                            streamSupported = false
+                            break
+                        }
+                        throw IllegalStateException("SSE ${code}")
+                    }
+                    failures = 0
+                    val source = response.body?.source()
+                        ?: throw IllegalStateException("SSE без тела")
+                    while (isActive && streamSessionId == sessionId) {
+                        val line = source.readUtf8Line() ?: break
+                        if (line.startsWith("data:")) {
+                            val payload = line.substring(5).trim()
+                            if (payload.isNotEmpty()) {
+                                val event = runCatching { JSONObject(payload) }.getOrNull()
+                                if (event != null) {
+                                    streamAlive = true
+                                    withContext(Dispatchers.Main) {
+                                        handleStreamEvent(sessionId, event)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    if (!isActive) break
+                    if (e is OpenCodeException && (e.status == 404 || e.status == 405)) {
+                        streamSupported = false
+                        break
+                    }
+                    failures++
+                    if (failures > 5) break
+                    delay(1_000L * failures)
+                } finally {
+                    runCatching { call?.cancel() }
+                    if (streamCall === call) streamCall = null
+                    if (streamSessionId == sessionId) streamAlive = false
+                }
+            }
+        }
+    }
+
+    private fun stopEventStream() {
+        streamSessionId = ""
+        streamAlive = false
+        runCatching { streamCall?.cancel() }
+        streamCall = null
+        streamJob?.cancel()
+        streamJob = null
+        streamParts.clear()
+    }
+
+    private fun handleStreamEvent(sessionId: String, event: JSONObject) {
+        if (chat.sessionId != sessionId) return
+        val type = event.optString("type")
+        val data = event.optJSONObject("data") ?: JSONObject()
+        val eventSession = data.optString("sessionID")
+        if (eventSession.isNotBlank() && eventSession != sessionId) return
+
+        fun part(id: String, created: Long = 0L): StreamPart =
+            streamParts.getOrPut(id) {
+                StreamPart(created = if (created > 0) created else System.currentTimeMillis())
+            }
+
+        when (type) {
+            "session.step.started" -> {
+                val id = data.optString("assistantMessageID")
+                if (id.isBlank()) return
+                val p = part(id, eventTime(event))
+                p.completed = false
+                ModelRef.fromJson(data.optJSONObject("model"))?.key?.let { p.modelLabel = it }
+                upsertStreamMessage(sessionId, id, p)
+            }
+
+            "session.text.started" -> {
+                val id = data.optString("assistantMessageID")
+                if (id.isBlank()) return
+                val p = part(id, eventTime(event))
+                p.texts.getOrPut(data.optInt("ordinal", 0)) { StringBuilder() }
+                upsertStreamMessage(sessionId, id, p)
+            }
+
+            "session.text.delta" -> {
+                val id = data.optString("assistantMessageID")
+                if (id.isBlank()) return
+                val p = part(id, eventTime(event))
+                p.texts.getOrPut(data.optInt("ordinal", 0)) { StringBuilder() }
+                    .append(data.optString("delta"))
+                upsertStreamMessage(sessionId, id, p)
+            }
+
+            "session.text.ended" -> {
+                val id = data.optString("assistantMessageID")
+                if (id.isBlank()) return
+                val p = part(id, eventTime(event))
+                p.texts[data.optInt("ordinal", 0)] = StringBuilder(data.optString("text"))
+                upsertStreamMessage(sessionId, id, p)
+            }
+
+            "session.reasoning.started" -> {
+                val id = data.optString("assistantMessageID")
+                if (id.isBlank()) return
+                val p = part(id, eventTime(event))
+                p.reasonings.getOrPut(data.optInt("ordinal", 0)) { StringBuilder() }
+                upsertStreamMessage(sessionId, id, p)
+            }
+
+            "session.reasoning.delta" -> {
+                val id = data.optString("assistantMessageID")
+                if (id.isBlank()) return
+                val p = part(id, eventTime(event))
+                p.reasonings.getOrPut(data.optInt("ordinal", 0)) { StringBuilder() }
+                    .append(data.optString("delta"))
+                upsertStreamMessage(sessionId, id, p)
+            }
+
+            "session.reasoning.ended" -> {
+                val id = data.optString("assistantMessageID")
+                if (id.isBlank()) return
+                val p = part(id, eventTime(event))
+                p.reasonings[data.optInt("ordinal", 0)] = StringBuilder(data.optString("text"))
+                upsertStreamMessage(sessionId, id, p)
+            }
+
+            "session.tool.input.started" -> {
+                val id = data.optString("assistantMessageID")
+                if (id.isBlank()) return
+                val p = part(id, eventTime(event))
+                p.tools[data.optString("id")] = ToolCall(
+                    name = data.optString("name"),
+                    status = "streaming",
+                    input = "",
+                    output = ""
+                )
+                upsertStreamMessage(sessionId, id, p)
+            }
+
+            "session.tool.input.delta" -> {
+                val id = data.optString("assistantMessageID")
+                if (id.isBlank()) return
+                val p = part(id, eventTime(event))
+                val toolId = data.optString("id")
+                val tool = p.tools[toolId] ?: ToolCall("", "streaming", "", "")
+                p.tools[toolId] = tool.copy(input = tool.input + data.optString("delta"))
+                upsertStreamMessage(sessionId, id, p)
+            }
+
+            "session.tool.input.ended" -> {
+                val id = data.optString("assistantMessageID")
+                if (id.isBlank()) return
+                val p = part(id, eventTime(event))
+                val toolId = data.optString("id")
+                val tool = p.tools[toolId] ?: ToolCall("", "streaming", "", "")
+                p.tools[toolId] = tool.copy(input = data.optString("text"))
+                upsertStreamMessage(sessionId, id, p)
+            }
+
+            "session.tool.called" -> {
+                val id = data.optString("assistantMessageID")
+                if (id.isBlank()) return
+                val p = part(id, eventTime(event))
+                val toolId = data.optString("id")
+                val tool = p.tools[toolId] ?: ToolCall("", "running", "", "")
+                p.tools[toolId] = tool.copy(
+                    status = "running",
+                    input = data.optJSONObject("input")?.toString(2) ?: tool.input
+                )
+                upsertStreamMessage(sessionId, id, p)
+            }
+
+            "session.tool.success" -> {
+                val id = data.optString("assistantMessageID")
+                if (id.isBlank()) return
+                val p = part(id, eventTime(event))
+                val toolId = data.optString("id")
+                val tool = p.tools[toolId] ?: ToolCall("", "completed", "", "")
+                p.tools[toolId] = tool.copy(
+                    status = "completed",
+                    output = toolOutput(data.optJSONArray("content"))
+                )
+                upsertStreamMessage(sessionId, id, p)
+            }
+
+            "session.tool.failed" -> {
+                val id = data.optString("assistantMessageID")
+                if (id.isBlank()) return
+                val p = part(id, eventTime(event))
+                val toolId = data.optString("id")
+                val tool = p.tools[toolId] ?: ToolCall("", "error", "", "")
+                p.tools[toolId] = tool.copy(
+                    status = "error",
+                    output = data.optJSONObject("error")?.optString("message")
+                        ?: toolOutput(data.optJSONArray("content"))
+                )
+                upsertStreamMessage(sessionId, id, p)
+            }
+
+            "session.step.failed" -> {
+                val id = data.optString("assistantMessageID")
+                if (id.isBlank()) return
+                val p = part(id, eventTime(event))
+                p.error = data.optJSONObject("error")?.optString("message").orEmpty()
+                upsertStreamMessage(sessionId, id, p)
+            }
+
+            "session.execution.failed" -> {
+                val message = data.optJSONObject("error")?.optString("message").orEmpty()
+                streamParts.values.forEach { it.completed = true; it.error = message }
+                streamParts.forEach { (id, p) -> upsertStreamMessage(sessionId, id, p) }
+                chat = chat.copy(sending = false, error = message)
+            }
+
+            "session.execution.succeeded", "session.idle" -> {
+                streamParts.values.forEach { it.completed = true }
+                streamParts.forEach { (id, p) -> upsertStreamMessage(sessionId, id, p) }
+                chat = chat.copy(sending = false)
+                viewModelScope.launch {
+                    delay(350)
+                    refreshMessages(server = serverForSession(sessionId) ?: return@launch)
+                }
+            }
+        }
+    }
+
+    private fun serverForSession(sessionId: String): ServerProfile? =
+        serverById(chat.serverId).takeIf { chat.sessionId == sessionId }
+
+    private fun eventTime(event: JSONObject): Long {
+        val created = event.optDouble("created", 0.0)
+        if (created <= 0.0) return System.currentTimeMillis()
+        return if (created > 10_000_000_000.0) created.toLong() else (created * 1000).toLong()
+    }
+
+    private fun toolOutput(content: JSONArray?): String {
+        if (content == null) return ""
+        return buildString {
+            for (i in 0 until content.length()) {
+                val text = content.optJSONObject(i)?.optString("text").orEmpty()
+                if (text.isBlank()) continue
+                if (isNotEmpty()) append('\n')
+                append(text)
+            }
+        }
+    }
+
+    private fun upsertStreamMessage(sessionId: String, id: String, part: StreamPart) {
+        if (chat.sessionId != sessionId) return
+        val text = part.texts.toSortedMap().values
+            .map { it.toString() }
+            .filter { it.isNotBlank() }
+            .joinToString("\n\n")
+            .trim()
+        val reasoning = part.reasonings.toSortedMap().values
+            .map { it.toString() }
+            .filter { it.isNotBlank() }
+            .joinToString("\n\n")
+            .trim()
+        val message = ChatMessage(
+            id = id,
+            role = "assistant",
+            text = text,
+            reasoning = reasoning,
+            tools = part.tools.values.toList(),
+            created = part.created,
+            completed = part.completed,
+            modelLabel = part.modelLabel,
+            error = part.error
+        )
+        val list = chat.messages.toMutableList()
+        val index = list.indexOfFirst { it.id == id }
+        if (index >= 0) list[index] = message else list.add(message)
+        chat = chat.copy(messages = list)
+    }
+
     fun loadChat(server: ServerProfile, sessionId: String) {
         chatLoadJob?.cancel()
         chat = ChatUi(
@@ -833,6 +1153,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
                 val loaded = io { hub.api(server).messages(sessionId) }
                 chat = chat.copy(messages = loaded, loading = false, sending = pollJob?.isActive == true)
+                startEventStream(server, sessionId)
             } catch (e: Exception) {
                 chat = chat.copy(error = e.message ?: "Не удалось загрузить чат", loading = false)
             }
@@ -885,6 +1206,24 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
         return result.values.toList()
+    }
+
+    /** Перечитывает сообщения, не сбрасывая состояние ожидания ответа. */
+    fun refreshMessages(server: ServerProfile) {
+        val sessionId = chat.sessionId
+        if (sessionId.isBlank()) return
+        viewModelScope.launch {
+            try {
+                val loaded = io { hub.api(server).messages(sessionId) }
+                if (chat.sessionId == sessionId) {
+                    chat = chat.copy(messages = loaded, error = "")
+                }
+            } catch (e: Exception) {
+                if (chat.sessionId == sessionId) {
+                    chat = chat.copy(error = humanError(e, "Не удалось обновить сообщения"))
+                }
+            }
+        }
     }
 
     private suspend fun modelsFor(server: ServerProfile): List<ModelInfo> {
@@ -1009,6 +1348,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
 
         pollJob?.cancel()
+        startEventStream(server, sessionId)
         val baseline = chat.messages.map { it.id }.toSet()
         val optimistic = ChatMessage(
             id = "local-${System.currentTimeMillis()}",
@@ -1029,13 +1369,24 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 var attempts = 0
                 var stableTicks = 0
                 var lastText = ""
+                var fetchFailures = 0
                 while (isActive) {
                     delay(1000)
                     attempts++
-                    val loaded = io { hub.api(server).messages(sessionId) }
+                    val loaded = try {
+                        io { hub.api(server).messages(sessionId) }.also { fetchFailures = 0 }
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        fetchFailures++
+                        if (fetchFailures >= 6) throw e
+                        continue
+                    }
                     if (chat.sessionId != sessionId) break
 
-                    chat = chat.copy(messages = loaded)
+                    // При живом SSE не перетираем более свежий поток устаревшим
+                    // снимком из polling. Если SSE отвалился — обновляемся как раньше.
+                    if (!streamAlive) chat = chat.copy(messages = loaded)
 
                     // Ответ ищем только среди сообщений, появившихся после отправки,
                     // иначе можно принять за ответ предыдущий завершённый ход.
@@ -1046,13 +1397,17 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     if (finished) break
                     if (attempts > MAX_POLL_SECONDS) break
 
-                    // Защита от «залипания»: сервер не присылает изменений слишком долго.
-                    val progress = answer?.let { it.text.length.toString() + ":" + it.tools.size } ?: ""
+                    // Долгое «размышление» — это нормально. Считаем прогрессом
+                    // и изменение текста, и изменение reasoning, и новые инструменты.
+                    val progress = answer?.let {
+                        "${it.text.length}:${it.reasoning.length}:${it.tools.size}:${it.completed}"
+                    } ?: ""
                     if (progress == lastText) stableTicks++ else stableTicks = 0
                     lastText = progress
                     if (answer != null && stableTicks > STALL_SECONDS) {
                         chat = chat.copy(
-                            error = "Ответ перестал обновляться. Нажмите «Обновить», чтобы перечитать чат."
+                            error = "Ответ давно не обновляется. Нажмите «Обновить», " +
+                                "чтобы перечитать чат, или «Остановить»."
                         )
                         break
                     }
@@ -2121,12 +2476,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         chatLoadJob?.cancel()
         oauthJob?.cancel()
         closeOAuthBridge()
+        stopEventStream()
         hub.closeAll()
     }
 
     private companion object {
-        const val MAX_POLL_SECONDS = 900
-        const val STALL_SECONDS = 120
+        const val MAX_POLL_SECONDS = 1_800
+        const val STALL_SECONDS = 600
         const val OAUTH_WAIT_SECONDS = 600
         const val MAX_UPLOAD_BYTES = 200L * 1024 * 1024
     }
