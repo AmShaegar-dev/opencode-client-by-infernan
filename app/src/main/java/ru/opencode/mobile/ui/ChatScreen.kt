@@ -296,6 +296,15 @@ fun ChatScreen(vm: AppViewModel, server: ServerProfile, modifier: Modifier = Mod
                             }
                         )
                         DropdownMenuItem(
+                            text = { Text("Сжать контекст", color = TextMain) },
+                            leadingIcon = { Icon(Icons.Filled.Tune, null, tint = TextMuted) },
+                            onClick = {
+                                menu = false
+                                toast("Сжимаем контекст…")
+                                vm.runCommand(server, "/compact")
+                            }
+                        )
+                        DropdownMenuItem(
                             text = { Text("Агенты", color = TextMain) },
                             leadingIcon = { Icon(Icons.Filled.Memory, null, tint = TextMuted) },
                             onClick = {

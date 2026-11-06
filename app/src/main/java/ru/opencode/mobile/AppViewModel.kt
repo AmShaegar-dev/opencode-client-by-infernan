@@ -177,6 +177,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     private val store = ServersStore(app)
     private val hub = ConnectionHub()
+    private val uiPrefs = app.getSharedPreferences("opencode_ui", Application.MODE_PRIVATE)
 
     var servers by mutableStateOf(store.read())
         private set
@@ -201,6 +202,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     var usage by mutableStateOf(UsageUi())
         private set
+
+    /** Свёрнута ли панель «Хранилище сервера» и «Лимиты OpenCode Go». */
+    var chatsCompact by mutableStateOf(uiPrefs.getBoolean("chats_compact", false))
+        private set
+
+    fun toggleChatsCompact() {
+        chatsCompact = !chatsCompact
+        uiPrefs.edit().putBoolean("chats_compact", chatsCompact).apply()
+    }
 
     var uploads by mutableStateOf<List<String>>(emptyList())
         private set

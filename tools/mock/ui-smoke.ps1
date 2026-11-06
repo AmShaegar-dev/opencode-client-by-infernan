@@ -167,6 +167,16 @@ Check "disk free shown" (HasText "10.0 ГБ")
 Check "usage card visible" (HasText "Лимиты OpenCode Go")
 Check "usage percent shown" (HasText "42%")
 
+# Панель хранилища и лимитов сворачивается и разворачивается.
+Check "panel toggle visible" (HasText "Свернуть панель")
+TapText "Свернуть панель"
+Start-Sleep -Seconds 1
+Check "panel collapsed" (HasText "Хранилище и лимиты")
+Check "storage hidden" (-not (HasText "Хранилище сервера"))
+TapText "Хранилище и лимиты"
+Start-Sleep -Seconds 1
+Check "storage expanded again" (HasText "Хранилище сервера")
+
 # Список файлов на сервере.
 TapText "Файлы"
 Start-Sleep -Seconds 1
@@ -258,6 +268,7 @@ Start-Sleep -Milliseconds 700
 # --- Уровень размышлений (варианты модели) --------------------------
 TapText "Меню"
 Start-Sleep -Seconds 1
+Check "compact menu item" (HasText "Сжать контекст")
 Check "thinking menu item" (HasText "Уровень размышлений")
 TapText "Уровень размышлений"
 Start-Sleep -Seconds 1

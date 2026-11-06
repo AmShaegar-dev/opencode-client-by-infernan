@@ -5,6 +5,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,6 +28,8 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
@@ -231,6 +234,49 @@ fun ChatsScreen(vm: AppViewModel, server: ServerProfile, modifier: Modifier = Mo
             )
 
             val storage = vm.storage
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    if (vm.chatsCompact) "Хранилище и лимиты" else "Свернуть панель",
+                    color = TextDim,
+                    fontSize = 11.sp,
+                    modifier = Modifier
+                        .clickable { vm.toggleChatsCompact() }
+                        .padding(vertical = 2.dp)
+                )
+                Icon(
+                    if (vm.chatsCompact) Icons.Filled.KeyboardArrowDown else Icons.Filled.KeyboardArrowUp,
+                    contentDescription = if (vm.chatsCompact) "Развернуть панель" else "Свернуть панель",
+                    tint = TextDim,
+                    modifier = Modifier
+                        .size(16.dp)
+                        .clickable { vm.toggleChatsCompact() }
+                )
+                Spacer(Modifier.weight(1f))
+                if (vm.chatsCompact) {
+                    val free = storage.info?.freeBytes?.let(Attachments::humanSize)
+                    val goWeek = vm.usage.info?.meters?.firstOrNull { it.label == "Неделя" }?.percent
+                    val summary = buildList {
+                        free?.let { add("Свободно $it") }
+                        goWeek?.let { add("Go ${it.toInt()}%") }
+                    }.joinToString(" · ")
+                    if (summary.isNotBlank()) {
+                        Text(
+                            summary,
+                            color = TextDim,
+                            fontSize = 10.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
+
+            if (!vm.chatsCompact) {
             Surface(
                 color = Surface1,
                 shape = RoundedCornerShape(12.dp),
@@ -392,6 +438,7 @@ fun ChatsScreen(vm: AppViewModel, server: ServerProfile, modifier: Modifier = Mo
                         }
                     }
                 }
+            }
             }
             Spacer(Modifier.height(4.dp))
 
