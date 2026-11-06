@@ -189,6 +189,24 @@ fun SettingsScreen(vm: AppViewModel, modifier: Modifier = Modifier) {
             Spacer(Modifier.height(10.dp))
 
             SectionCard {
+                Text("Подключение с телефона", color = TextMain, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Как запустить сервер на компьютере, открыть его через AWG или " +
+                        "локальную сеть и продолжить работу с теми же чатами.",
+                    color = TextMuted,
+                    fontSize = 12.sp,
+                    lineHeight = 17.sp
+                )
+                Spacer(Modifier.height(10.dp))
+                SecondaryButton(
+                    text = "Инструкция: сервер и вкладки",
+                    onClick = { vm.openGuide() }
+                )
+            }
+            Spacer(Modifier.height(10.dp))
+
+            SectionCard {
                 Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                     Text(
                         "Обновления",

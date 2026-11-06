@@ -130,6 +130,13 @@ Shot "01_home"
 TapText "Настройки"
 Start-Sleep -Seconds 1
 Check "settings screen" (HasText "Проверить обновление")
+TapText "Инструкция: сервер и вкладки"
+Start-Sleep -Seconds 1
+Check "guide screen" (HasText "компьютер и телефон")
+Check "guide server step" (HasText "Запустите сервер")
+TapText "Назад"
+Start-Sleep -Milliseconds 700
+Check "back to settings" (HasText "Проверить обновление")
 TapText "Назад"
 Start-Sleep -Milliseconds 700
 
@@ -138,9 +145,10 @@ Tap 945 2150
 Start-Sleep -Seconds 1
 TapText "Прямой URL"
 Start-Sleep -Seconds 1
-TapText "Как настроить AWG и OpenCode"
+TapText "Инструкция: сервер и вкладки"
 Start-Sleep -Seconds 1
-Check "awg help dialog" (HasText "opencode serve --hostname")
+Check "connection guide" (HasText "opencode serve --hostname")
+Check "guide server step" (HasText "Запустите сервер")
 TapText "Понятно"
 Start-Sleep -Milliseconds 700
 SetEditField 0 "Mock"

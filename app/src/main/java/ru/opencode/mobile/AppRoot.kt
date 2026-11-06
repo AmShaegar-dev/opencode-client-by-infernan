@@ -11,6 +11,7 @@ import androidx.compose.ui.Modifier
 import ru.opencode.mobile.ui.BackupScreen
 import ru.opencode.mobile.ui.ChatScreen
 import ru.opencode.mobile.ui.ChatsScreen
+import ru.opencode.mobile.ui.GuideScreen
 import ru.opencode.mobile.ui.InstallScreen
 import ru.opencode.mobile.ui.ProvidersScreen
 import ru.opencode.mobile.ui.ServerEditorScreen
@@ -84,6 +85,8 @@ fun AppRoot(vm: AppViewModel) {
             is Screen.Backup -> BackupScreen(vm, screen.serverId, modifier)
 
             Screen.Settings -> SettingsScreen(vm, modifier)
+
+            Screen.Guide -> GuideScreen(vm, modifier)
         }
     }
 

@@ -64,6 +64,7 @@ sealed interface Screen {
     data class Providers(val serverId: String) : Screen
     data class Backup(val serverId: String?) : Screen
     data object Settings : Screen
+    data object Guide : Screen
 }
 
 data class SessionsUi(
@@ -332,7 +333,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 true
             }
 
-            is Screen.Editor, is Screen.Install, is Screen.Backup, Screen.Settings -> {
+            is Screen.Editor, is Screen.Install, is Screen.Backup, Screen.Settings, Screen.Guide -> {
                 backStack.clear()
                 screen = Screen.Servers
                 true
@@ -380,6 +381,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun openSettings() {
         navigate(Screen.Settings)
+    }
+
+    fun openGuide() {
+        navigate(Screen.Guide)
     }
 
     fun backFromChats() {

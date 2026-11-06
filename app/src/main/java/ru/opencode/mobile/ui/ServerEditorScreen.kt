@@ -89,7 +89,7 @@ fun ServerEditorScreen(
     }
     var testStatus by remember(key) { mutableStateOf<ServerStatus?>(null) }
     var testing by remember(key) { mutableStateOf(false) }
-    var showAwgHelp by remember(key) { mutableStateOf(false) }
+    var showGuide by remember(key) { mutableStateOf(false) }
     var serverPassword by remember(key) {
         mutableStateOf(existing?.serverPassword?.takeIf { it.isNotBlank() } ?: Passwords.generate())
     }
@@ -395,10 +395,8 @@ fun ServerEditorScreen(
                         testStatus = null
                     }
                 }
-                if (localPreset) {
-                    TextButton(onClick = { showAwgHelp = true }) {
-                        Text("Как настроить AWG и OpenCode", color = Accent, fontSize = 12.sp)
-                    }
+                TextButton(onClick = { showGuide = true }) {
+                    Text("Инструкция: сервер и вкладки", color = Accent, fontSize = 12.sp)
                 }
                 Spacer(Modifier.height(6.dp))
 
@@ -559,22 +557,8 @@ fun ServerEditorScreen(
         }
     }
 
-    if (showAwgHelp) {
-        ConfirmDialog(
-            title = "Подключение через AmneziaWG",
-            text = "1. Установите AmneziaWG на телефон и включите конфигурацию, " +
-                "которая ведёт к вашему серверу или домашнему ПК.\n\n" +
-                "2. На компьютере запустите OpenCode с доступом по сети:\n" +
-                "opencode serve --hostname 0.0.0.0 --port 4096\n" +
-                "Пароль API должен совпадать с OPENCODE_PASSWORD.\n\n" +
-                "3. Укажите адрес компьютера в туннеле — обычно 10.8.0.3.\n\n" +
-                "Приложение не поднимает VPN само: AmneziaWG должен быть включён " +
-                "на телефоне до подключения.",
-            confirmText = "Понятно",
-            destructive = false,
-            onConfirm = { showAwgHelp = false },
-            onDismiss = { showAwgHelp = false }
-        )
+    if (showGuide) {
+        GuideDialog(vm) { showGuide = false }
     }
 
     if (confirmDelete && existing != null) {
