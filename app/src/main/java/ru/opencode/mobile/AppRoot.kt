@@ -1,6 +1,8 @@
 package ru.opencode.mobile
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
@@ -32,7 +34,13 @@ fun AppRoot(vm: AppViewModel) {
     }
 
     Scaffold(containerColor = Bg) { padding ->
-        val modifier = Modifier.padding(padding)
+        // imePadding сдвигает содержимое над клавиатурой, а consumeWindowInsets
+        // не даёт учесть панель навигации дважды. Без этого при edge-to-edge
+        // клавиатура перекрывает поля ввода (пароль SSH/API и т. п.).
+        val modifier = Modifier
+            .padding(padding)
+            .consumeWindowInsets(padding)
+            .imePadding()
         when (val screen = currentScreen) {
             Screen.Servers -> ServersScreen(vm, modifier)
 

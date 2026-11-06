@@ -176,11 +176,11 @@ Start-Sleep -Seconds 3
 Shot "05_chat"
 
 # --- Отправка сообщения (клавиатуру прячем до нажатия «отправить») --
-Tap 400 2150
+Tap 400 2250
 TypeText "SmokeTest"
 Adb shell input keyevent 4 | Out-Null
 Start-Sleep -Milliseconds 900
-Tap 984 2184
+Tap 984 2256
 Start-Sleep -Seconds 1
 Shot "06_sending"
 Start-Sleep -Seconds 6

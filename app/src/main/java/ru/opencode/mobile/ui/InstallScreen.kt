@@ -292,6 +292,7 @@ fun InstallScreen(vm: AppViewModel, existing: ServerProfile?, modifier: Modifier
                     label = "Пароль API OpenCode",
                     value = serverPassword,
                     onValueChange = { serverPassword = it },
+                    secret = true,
                     enabled = !installing,
                     hint = "Сохранится в /etc/opencode/server.env и в приложении. Используется для Basic Auth."
                 )
