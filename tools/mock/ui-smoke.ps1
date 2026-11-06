@@ -138,9 +138,17 @@ Tap 945 2150
 Start-Sleep -Seconds 1
 TapText "Прямой URL"
 Start-Sleep -Seconds 1
+TapText "Как настроить AWG и OpenCode"
+Start-Sleep -Seconds 1
+Check "awg help dialog" (HasText "opencode serve --hostname")
+TapText "Понятно"
+Start-Sleep -Milliseconds 700
 SetEditField 0 "Mock"
 SetEditField 1 "http://10.0.2.2:4096"
 SetEditField 2 "testpass123"
+TapText "Проверить подключение"
+Start-Sleep -Seconds 3
+Check "connection test online" (HasText "Подключено. OpenCode")
 Shot "02_editor"
 TapText "Добавить сервер"
 Start-Sleep -Seconds 6

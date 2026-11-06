@@ -493,6 +493,35 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * Проверяет соединение по параметрам из редактора, не сохраняя профиль.
+     * Нужна для пресета «Локальная сеть / AWG»: адрес и пароль можно
+     * проверить до добавления сервера.
+     */
+    fun testConnection(profile: ServerProfile, onResult: (ServerStatus) -> Unit) {
+        viewModelScope.launch {
+            val result = io {
+                try {
+                    val info = hub.api(profile).info()
+                    ServerStatus(
+                        online = true,
+                        version = info.optString("version"),
+                        checkedAt = System.currentTimeMillis()
+                    )
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    ServerStatus(
+                        online = false,
+                        error = e.message ?: "Не удалось подключиться",
+                        checkedAt = System.currentTimeMillis()
+                    )
+                }
+            }
+            onResult(result)
+        }
+    }
+
     fun refreshStatuses() {
         servers.forEach(::checkStatus)
     }

@@ -41,6 +41,7 @@ import ru.opencode.mobile.data.ConnectionMode
 import ru.opencode.mobile.data.Passwords
 import ru.opencode.mobile.data.ServerColors
 import ru.opencode.mobile.data.ServerProfile
+import ru.opencode.mobile.data.ServerStatus
 import ru.opencode.mobile.data.UrlTools
 import ru.opencode.mobile.net.HostInfo
 import ru.opencode.mobile.net.Ssh
@@ -52,6 +53,9 @@ import ru.opencode.mobile.ui.theme.Surface1
 import ru.opencode.mobile.ui.theme.TextDim
 import ru.opencode.mobile.ui.theme.TextMain
 import ru.opencode.mobile.ui.theme.TextMuted
+
+/** Типовой адрес компьютера в туннеле AmneziaWG. */
+private const val AWG_DEFAULT_URL = "http://10.8.0.3:4096"
 
 @Composable
 fun ServerEditorScreen(
@@ -77,6 +81,15 @@ fun ServerEditorScreen(
     var directUrl by remember(key) { mutableStateOf(existing?.directUrl.orEmpty()) }
     var allowInsecureHttp by remember(key) { mutableStateOf(existing?.allowInsecureHttp ?: false) }
     var tlsPin by remember(key) { mutableStateOf(existing?.tlsPin.orEmpty()) }
+    var localPreset by remember(key) {
+        mutableStateOf(
+            existing == null || existing.directUrl.isBlank() ||
+                UrlTools.isLocalUrl(existing.directUrl)
+        )
+    }
+    var testStatus by remember(key) { mutableStateOf<ServerStatus?>(null) }
+    var testing by remember(key) { mutableStateOf(false) }
+    var showAwgHelp by remember(key) { mutableStateOf(false) }
     var serverPassword by remember(key) {
         mutableStateOf(existing?.serverPassword?.takeIf { it.isNotBlank() } ?: Passwords.generate())
     }
@@ -207,6 +220,41 @@ fun ServerEditorScreen(
         }
     }
 
+    fun testDirect() {
+        val normalized = UrlTools.normalize(directUrl)
+        if (normalized == null) {
+            testStatus = ServerStatus(online = false, error = "Укажите URL OpenCode")
+            return
+        }
+        if (UrlTools.isInsecureExternal(normalized) && !allowInsecureHttp) {
+            testStatus = ServerStatus(
+                online = false,
+                error = "Сначала разрешите HTTP без шифрования или используйте HTTPS"
+            )
+            return
+        }
+        if (serverPassword.isBlank()) {
+            testStatus = ServerStatus(online = false, error = "Введите пароль API OpenCode")
+            return
+        }
+        testing = true
+        testStatus = null
+        val probeProfile = ServerProfile(
+            id = "test-${existing?.id ?: "new"}",
+            name = "Проверка",
+            color = 0,
+            mode = ConnectionMode.DIRECT,
+            directUrl = directUrl.trim(),
+            allowInsecureHttp = allowInsecureHttp,
+            tlsPin = tlsPin.trim(),
+            serverPassword = serverPassword.trim()
+        )
+        vm.testConnection(probeProfile) { result ->
+            testing = false
+            testStatus = result
+        }
+    }
+
     Column(modifier.fillMaxSize()) {
         AppHeader(
             title = if (existing == null) "Новый сервер" else "Сервер",
@@ -332,12 +380,42 @@ fun ServerEditorScreen(
                     hint = "Заполнится после проверки. Защищает от подмены сервера."
                 )
             } else {
+                Text("Способ подключения", color = TextMuted, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ModeChip("Локальная сеть / AWG", localPreset) {
+                        localPreset = true
+                        if (directUrl.isBlank() || !UrlTools.isLocalUrl(directUrl)) {
+                            directUrl = AWG_DEFAULT_URL
+                        }
+                        testStatus = null
+                    }
+                    ModeChip("Другой адрес", !localPreset) {
+                        localPreset = false
+                        testStatus = null
+                    }
+                }
+                if (localPreset) {
+                    TextButton(onClick = { showAwgHelp = true }) {
+                        Text("Как настроить AWG и OpenCode", color = Accent, fontSize = 12.sp)
+                    }
+                }
+                Spacer(Modifier.height(6.dp))
+
                 LabeledField(
                     label = "URL OpenCode",
                     value = directUrl,
-                    onValueChange = { directUrl = it },
-                    placeholder = "https://server.example:4096",
-                    hint = "Для внешнего доступа используйте HTTPS."
+                    onValueChange = {
+                        directUrl = it
+                        testStatus = null
+                    },
+                    placeholder = if (localPreset) AWG_DEFAULT_URL else "https://server.example:4096",
+                    hint = if (localPreset) {
+                        "Адрес компьютера в туннеле AmneziaWG и порт OpenCode. " +
+                            "Если 10.8.0.3 не отвечает, проверьте адрес ПК в конфигурации AWG."
+                    } else {
+                        "Для внешнего доступа используйте HTTPS."
+                    }
                 )
                 val normalized = UrlTools.normalize(directUrl)
                 val insecure = normalized != null && UrlTools.isInsecureExternal(normalized)
@@ -359,7 +437,10 @@ fun ServerEditorScreen(
                         )
                         Switch(
                             checked = allowInsecureHttp,
-                            onCheckedChange = { allowInsecureHttp = it }
+                            onCheckedChange = {
+                                allowInsecureHttp = it
+                                testStatus = null
+                            }
                         )
                     }
                     Spacer(Modifier.height(6.dp))
@@ -368,7 +449,10 @@ fun ServerEditorScreen(
                     LabeledField(
                         label = "SHA-256 пин сертификата (необязательно)",
                         value = tlsPin,
-                        onValueChange = { tlsPin = it },
+                        onValueChange = {
+                            tlsPin = it
+                            testStatus = null
+                        },
                         placeholder = "sha256/AAAAAAAA…",
                         hint = "Защищает от подмены HTTPS-сертификата. Оставьте пустым, если не уверены."
                     )
@@ -378,10 +462,35 @@ fun ServerEditorScreen(
             LabeledField(
                 label = "Пароль API OpenCode",
                 value = serverPassword,
-                onValueChange = { serverPassword = it },
+                onValueChange = {
+                    serverPassword = it
+                    testStatus = null
+                },
                 secret = true,
                 hint = "OPENCODE_PASSWORD на сервере. Для локального туннеля пароль обязателен."
             )
+
+            if (mode == ConnectionMode.DIRECT) {
+                SecondaryButton(
+                    text = if (testing) "Проверяем…" else "Проверить подключение",
+                    onClick = ::testDirect,
+                    enabled = !testing
+                )
+                testStatus?.let { status ->
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        if (status.online) {
+                            "Подключено. OpenCode ${status.version.ifBlank { "—" }}"
+                        } else {
+                            status.error.ifBlank { "Не удалось подключиться" }
+                        },
+                        color = if (status.online) Accent else Red,
+                        fontSize = 12.sp,
+                        lineHeight = 16.sp
+                    )
+                }
+                Spacer(Modifier.height(10.dp))
+            }
 
             if (existing != null) {
                 val status = vm.statusOf(existing.id)
@@ -448,6 +557,24 @@ fun ServerEditorScreen(
             )
             Spacer(Modifier.height(28.dp))
         }
+    }
+
+    if (showAwgHelp) {
+        ConfirmDialog(
+            title = "Подключение через AmneziaWG",
+            text = "1. Установите AmneziaWG на телефон и включите конфигурацию, " +
+                "которая ведёт к вашему серверу или домашнему ПК.\n\n" +
+                "2. На компьютере запустите OpenCode с доступом по сети:\n" +
+                "opencode serve --hostname 0.0.0.0 --port 4096\n" +
+                "Пароль API должен совпадать с OPENCODE_PASSWORD.\n\n" +
+                "3. Укажите адрес компьютера в туннеле — обычно 10.8.0.3.\n\n" +
+                "Приложение не поднимает VPN само: AmneziaWG должен быть включён " +
+                "на телефоне до подключения.",
+            confirmText = "Понятно",
+            destructive = false,
+            onConfirm = { showAwgHelp = false },
+            onDismiss = { showAwgHelp = false }
+        )
     }
 
     if (confirmDelete && existing != null) {
