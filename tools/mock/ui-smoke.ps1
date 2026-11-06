@@ -147,7 +147,7 @@ TapText "Прямой URL"
 Start-Sleep -Seconds 1
 TapText "Инструкция: сервер и вкладки"
 Start-Sleep -Seconds 1
-Check "connection guide" (HasText "opencode serve --hostname")
+Check "connection guide" (HasText "ai.opencode.desktop")
 Check "guide server step" (HasText "Запустите сервер")
 TapText "Понятно"
 Start-Sleep -Milliseconds 700
@@ -203,6 +203,16 @@ Start-Sleep -Seconds 6
 Shot "07_answer"
 Check "message sent" (HasText "SmokeTest")
 Check "mock answer received" (HasText "Эхо: SmokeTest")
+
+# Размышления скрыты по умолчанию и раскрываются нажатием.
+Check "reasoning header visible" (HasText "Размышления")
+Check "reasoning text hidden" (-not (HasText "Размышление mock-модели"))
+TapText "Размышления"
+Start-Sleep -Seconds 1
+Check "reasoning expands" (HasText "Размышление mock-модели")
+TapText "Скрыть размышления"
+Start-Sleep -Milliseconds 700
+Check "reasoning hides again" (-not (HasText "Размышление mock-модели"))
 
 # --- Выбор моделей: включение и выключение через API сервера --------
 TapText "Mock Free Model" 1500

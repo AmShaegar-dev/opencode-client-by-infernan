@@ -4,8 +4,8 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
-val appVersionName = (findProperty("appVersionName") as String?)?.takeIf { it.isNotBlank() } ?: "1.0.5"
-val appVersionCode = (findProperty("appVersionCode") as String?)?.toIntOrNull() ?: 105
+val appVersionName = (findProperty("appVersionName") as String?)?.takeIf { it.isNotBlank() } ?: "1.0.6"
+val appVersionCode = (findProperty("appVersionCode") as String?)?.toIntOrNull() ?: 106
 
 android {
     namespace = "ru.opencode.mobile"

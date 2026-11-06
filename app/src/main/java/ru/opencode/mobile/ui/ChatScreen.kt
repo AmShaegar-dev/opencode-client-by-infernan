@@ -921,17 +921,8 @@ private fun MessageItem(message: ChatMessage, isLast: Boolean, sending: Boolean)
         return
     }
 
-    var reasoningOpen by remember(message.id) {
-        mutableStateOf(!message.completed && message.reasoning.isNotBlank())
-    }
+    var reasoningOpen by remember(message.id) { mutableStateOf(false) }
     var toolsOpen by remember(message.id) { mutableStateOf(false) }
-
-    // Пока модель размышляет, показываем поток размышлений раскрытым.
-    LaunchedEffect(sending, message.completed, message.reasoning.isNotBlank()) {
-        if (sending && !message.completed && message.reasoning.isNotBlank()) {
-            reasoningOpen = true
-        }
-    }
 
     Surface(
         color = Surface1,
@@ -968,7 +959,11 @@ private fun MessageItem(message: ChatMessage, isLast: Boolean, sending: Boolean)
             if (message.reasoning.isNotBlank()) {
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    if (reasoningOpen) "Скрыть размышления" else "Размышления (${message.reasoning.length})",
+                    if (reasoningOpen) {
+                        "Скрыть размышления ▴"
+                    } else {
+                        "Размышления (${message.reasoning.length}) ▾"
+                    },
                     color = Blue,
                     fontSize = 11.sp,
                     modifier = Modifier.clickable { reasoningOpen = !reasoningOpen }
