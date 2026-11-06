@@ -1,4 +1,4 @@
-﻿package ru.opencode.mobile.data
+package ru.opencode.mobile.data
 
 import org.json.JSONArray
 import org.json.JSONObject
@@ -43,6 +43,7 @@ object Runner {
         modelToggles()
         profiles()
         updateVersions()
+        updateManifest()
         passwords()
         println()
         println(if (failures == 0) "ALL CHECKS PASSED ($passed)" else "FAILURES: $failures (passed $passed)")
@@ -507,6 +508,35 @@ object Runner {
         check("older version") { !VersionTools.isNewer("0.9.9", "1.0.0") }
         check("v-prefix") { VersionTools.isNewer("v1.2.0", "1.1.0") }
         check("prerelease suffix") { VersionTools.isNewer("v2.0.0-beta", "1.9.9") }
+    }
+
+    private fun updateManifest() {
+        val body = """
+            {
+              "version": "1.0.5",
+              "name": "OpenCode Client by inFernan v1.0.5",
+              "notes": "Заметки о релизе",
+              "apk": "https://github.com/AmShaegar-dev/opencode-client-by-infernan/releases/download/v1.0.5/OpenCode-Client-by-inFernan-v1.0.5.apk",
+              "page": "https://github.com/AmShaegar-dev/opencode-client-by-infernan/releases/tag/v1.0.5",
+              "publishedAt": "2026-11-06T12:00:00Z"
+            }
+        """.trimIndent()
+
+        val update = UpdateManifest.parse(body, "1.0.4")
+        eq("manifest version", "1.0.5", update?.version)
+        eq("manifest name", "OpenCode Client by inFernan v1.0.5", update?.name)
+        eq("manifest notes", "Заметки о релизе", update?.notes)
+        check("manifest apk url") { update?.assetUrl?.endsWith(".apk") == true }
+        check("manifest same version ignored") { UpdateManifest.parse(body, "1.0.5") == null }
+        check("manifest older ignored") { UpdateManifest.parse(body, "1.0.6") == null }
+        check("manifest empty ignored") { UpdateManifest.parse("{}", "1.0.0") == null }
+        check("manifest invalid ignored") { UpdateManifest.parse("not json", "1.0.0") == null }
+
+        val derived = UpdateManifest.parse("""{"version":"v2.0.0"}""", "1.0.4")
+        check("manifest derives apk url") {
+            derived?.assetUrl?.contains("OpenCode-Client-by-inFernan-v2.0.0.apk") == true
+        }
+        check("manifest v-prefix stripped") { derived?.version == "2.0.0" }
     }
 
     private fun passwords() {

@@ -1,0 +1,9 @@
+{
+    "version":  "1.0.4",
+    "name":  "OpenCode Client by inFernan v1.0.4",
+    "notes":  "# OpenCode Client by inFernan — v1.0.4\n\nПроверка обновлений работает без лимитов GitHub API.\n\n## Что нового\n\n- **Исправлена ошибка «GitHub ответил 403».** Проверка обновлений больше не\n  зависит от GitHub API: приложение читает небольшой `update.json` из релиза\n  или из ветки `main`. Это обходит лимит 60 запросов в час, который особенно\n  часто исчерпан на мобильных операторах с общим IP.\n- Если все источники недоступны, в настройках появляется кнопка\n  **«Открыть страницу релизов»** — APK можно скачать вручную.\n- Старый способ через GitHub API остался запасным вариантом.\n- Пресет **«Локальная сеть / AWG»** и проверка подключения из v1.0.3 сохранены.\n\n## Установка\n\n1. Скачайте `OpenCode-Client-by-inFernan-v1.0.4.apk`.\n2. Разрешите установку из этого источника.\n3. Обновление установится поверх v1.0.0 – v1.0.3.\n\n## SHA-256 APK\n\n`5BEE0B64E186B227FB5FECDDCFEF573F120AF2CC43AB2AF4152D61EC140C8F06`\n\n## Проверка обновлений\n\nПриложение читает\n`https://github.com/AmShaegar-dev/opencode-client-by-infernan/releases/latest/download/update.json`\nи проверяет обновления не чаще одного раза в сутки.\n",
+    "apk":  "https://github.com/AmShaegar-dev/opencode-client-by-infernan/releases/download/v1.0.4/OpenCode-Client-by-inFernan-v1.0.4.apk",
+    "page":  "https://github.com/AmShaegar-dev/opencode-client-by-infernan/releases/tag/v1.0.4",
+    "publishedAt":  "2026-11-06T10:35:20Z",
+    "sha256":  "5BEE0B64E186B227FB5FECDDCFEF573F120AF2CC43AB2AF4152D61EC140C8F06"
+}

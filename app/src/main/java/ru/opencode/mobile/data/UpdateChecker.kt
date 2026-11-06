@@ -17,6 +17,43 @@ data class AppUpdate(
 )
 
 /**
+ * Разбор `update.json` без сети и без OkHttp.
+ * Вынесено отдельно, чтобы проверять в консольном Runner.
+ */
+object UpdateManifest {
+
+    private const val PROJECT =
+        "https://github.com/AmShaegar-dev/opencode-client-by-infernan"
+
+    /**
+     * Если ссылка на APK не указана, она собирается по номеру версии.
+     * Возвращает null, если версия не новее текущей или JSON некорректен.
+     */
+    fun parse(body: String, currentVersion: String): AppUpdate? {
+        val root = runCatching { JSONObject(body) }.getOrNull() ?: return null
+        val version = root.optString("version")
+            .trim()
+            .removePrefix("v")
+            .removePrefix("V")
+            .takeIf { it.isNotBlank() }
+            ?: return null
+        if (!VersionTools.isNewer(version, currentVersion)) return null
+        val assetUrl = root.optString("apk").trim().ifBlank {
+            "$PROJECT/releases/download/v$version/" +
+                "OpenCode-Client-by-inFernan-v$version.apk"
+        }
+        return AppUpdate(
+            version = version,
+            name = root.optString("name").ifBlank { "OpenCode Client by inFernan v$version" },
+            notes = root.optString("notes"),
+            assetUrl = assetUrl,
+            pageUrl = root.optString("page").ifBlank { "$PROJECT/releases/tag/v$version" },
+            publishedAt = root.optString("publishedAt")
+        )
+    }
+}
+
+/**
  * Проверка обновлений по последнему GitHub Release.
  *
  * Репозиторий задаётся константами ниже. Для публичного репозитория токен
@@ -27,6 +64,16 @@ object UpdateChecker {
     const val GITHUB_OWNER = "AmShaegar-dev"
     const val GITHUB_REPO = "opencode-client-by-infernan"
     const val PROJECT_URL = "https://github.com/$GITHUB_OWNER/$GITHUB_REPO"
+
+    /**
+     * Манифест обновлений лежит прямо в релизе и в ветке main.
+     * Он не расходует лимит GitHub API (60 запросов в час на IP), из-за
+     * которого на мобильных операторах проверка отвечала 403.
+     */
+    private const val MANIFEST_ASSET_URL =
+        "$PROJECT_URL/releases/latest/download/update.json"
+    private const val MANIFEST_RAW_URL =
+        "https://raw.githubusercontent.com/$GITHUB_OWNER/$GITHUB_REPO/main/update.json"
 
     private const val CHECK_INTERVAL_MS = 24L * 60 * 60 * 1000
     private const val PREFS = "opencode_updates"
@@ -66,6 +113,28 @@ object UpdateChecker {
 
     /** Возвращает обновление или null, если установлена последняя версия. */
     fun check(currentVersion: String): AppUpdate? {
+        val manifest = runCatching { fetchManifest(MANIFEST_ASSET_URL, currentVersion) }
+            .recoverCatching { fetchManifest(MANIFEST_RAW_URL, currentVersion) }
+        if (manifest.isSuccess) return manifest.getOrNull()
+        return checkApi(currentVersion)
+    }
+
+    private fun fetchManifest(url: String, currentVersion: String): AppUpdate? {
+        val request = Request.Builder()
+            .url(url)
+            .header("Accept", "application/json")
+            .header("User-Agent", "OpenCode-Client-by-inFernan")
+            .build()
+        client.newCall(request).execute().use { resp ->
+            if (!resp.isSuccessful) {
+                throw IllegalStateException("Манифест обновлений: HTTP ${resp.code}")
+            }
+            val body = resp.body?.string().orEmpty()
+            return UpdateManifest.parse(body, currentVersion)
+        }
+    }
+
+    private fun checkApi(currentVersion: String): AppUpdate? {
         val request = Request.Builder()
             .url("https://api.github.com/repos/$GITHUB_OWNER/$GITHUB_REPO/releases/latest")
             .header("Accept", "application/vnd.github+json")
@@ -76,6 +145,12 @@ object UpdateChecker {
             val body = resp.body?.string().orEmpty()
             if (resp.code == 404) {
                 throw IllegalStateException("Релизы на GitHub пока не опубликованы")
+            }
+            if (resp.code == 403) {
+                throw IllegalStateException(
+                    "GitHub ограничил частоту запросов (403). " +
+                        "Попробуйте позже или скачайте APK со страницы релизов."
+                )
             }
             if (!resp.isSuccessful) {
                 throw IllegalStateException("GitHub ответил ${resp.code}")

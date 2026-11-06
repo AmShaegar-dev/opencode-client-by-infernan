@@ -216,12 +216,21 @@ fun SettingsScreen(vm: AppViewModel, modifier: Modifier = Modifier) {
                 }
 
                 when {
-                    state.error.isNotBlank() -> Text(
-                        state.error,
-                        color = Red,
-                        fontSize = 12.sp,
-                        lineHeight = 16.sp
-                    )
+                    state.error.isNotBlank() -> {
+                        Text(
+                            state.error,
+                            color = Red,
+                            fontSize = 12.sp,
+                            lineHeight = 16.sp
+                        )
+                        TextButton(
+                            onClick = {
+                                openUrl(context, UpdateChecker.PROJECT_URL + "/releases/latest")
+                            }
+                        ) {
+                            Text("Открыть страницу релизов", color = Accent, fontSize = 12.sp)
+                        }
+                    }
 
                     state.latest != null -> {
                         Text(
