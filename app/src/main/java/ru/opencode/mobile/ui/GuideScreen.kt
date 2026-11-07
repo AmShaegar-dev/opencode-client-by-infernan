@@ -4,6 +4,8 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -35,6 +37,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ru.opencode.mobile.AppViewModel
+import ru.opencode.mobile.LanSetup
 import ru.opencode.mobile.ui.theme.Accent
 import ru.opencode.mobile.ui.theme.AccentSoft
 import ru.opencode.mobile.ui.theme.Border
@@ -96,6 +99,24 @@ fun GuideDialog(vm: AppViewModel, onDismiss: () -> Unit) {
 
 @Composable
 private fun GuideContent(vm: AppViewModel, showActions: Boolean) {
+    val context = LocalContext.current
+    val saveBat = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/x-msdownload")
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val written = runCatching {
+            context.contentResolver.openOutputStream(uri)?.use { stream ->
+                stream.write(LanSetup.buildBat(context).toByteArray(Charsets.UTF_8))
+            } != null
+        }.getOrDefault(false)
+        Toast.makeText(
+            context,
+            if (written) "Файл сохранён. Запустите его на компьютере двойным щелчком."
+            else "Не удалось сохранить файл",
+            Toast.LENGTH_LONG
+        ).show()
+    }
+
     SectionCard {
         Text(
             "Один сервер — компьютер и телефон",
@@ -178,6 +199,39 @@ private fun GuideContent(vm: AppViewModel, showActions: Boolean) {
             color = TextDim,
             fontSize = 11.sp,
             lineHeight = 16.sp
+        )
+    }
+    Spacer(Modifier.height(12.dp))
+
+    SectionCard {
+        Text(
+            "Автонастройка для Windows",
+            color = TextMain,
+            fontWeight = FontWeight.SemiBold
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "Скачайте opencode-lan.bat и запустите его на компьютере двойным " +
+                "щелчком. Скрипт сам запросит права администратора, найдёт службу " +
+                "OpenCode Desktop, задаст пароль, разрешит подключения из локальной " +
+                "сети, добавит правило брандмауэра и покажет адрес для телефона.",
+            color = TextMuted,
+            fontSize = 12.sp,
+            lineHeight = 17.sp
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "Пароль по умолчанию — AwgPass12345. Окно PowerShell останется открытым " +
+                "и покажет URL, логин и пароль — их нужно ввести в приложении. " +
+                "Шаги 1 и 2 ниже можно не выполнять вручную.",
+            color = TextDim,
+            fontSize = 11.sp,
+            lineHeight = 16.sp
+        )
+        Spacer(Modifier.height(10.dp))
+        SecondaryButton(
+            text = "Скачать opencode-lan.bat",
+            onClick = { saveBat.launch(LanSetup.FILE_NAME) }
         )
     }
     Spacer(Modifier.height(12.dp))

@@ -46,6 +46,8 @@ object Runner {
         updateManifest()
         textCleaner()
         displayMerge()
+        cacheParsing()
+        serverSignals()
         passwords()
         println()
         println(if (failures == 0) "ALL CHECKS PASSED ($passed)" else "FAILURES: $failures (passed $passed)")
@@ -594,6 +596,60 @@ object Runner {
             listOf(ChatMessage(id = "solo", role = "assistant", text = "ok", completed = true))
         )
         eq("single run stable id", "run_solo", single[0].message.id)
+    }
+
+    private fun cacheParsing() {
+        val sessionsRaw = """
+            {"data":[{"id":"s1","title":"Чат","time":{"created":1,"updated":2},
+            "model":{"id":"m","providerID":"p"}}]}
+        """.trimIndent()
+        val parsed = ChatJson.sessions(sessionsRaw)
+        eq("cache sessions count", 1, parsed.size)
+        eq("cache session title", "Чат", parsed[0].title)
+        eq("cache session model", "p/m", parsed[0].model?.key)
+
+        val messagesRaw = """
+            {"data":[
+              {"id":"a","type":"user","time":{"created":2},"text":"второй"},
+              {"id":"b","type":"user","time":{"created":1},"text":"первый"}
+            ]}
+        """.trimIndent()
+        val messages = ChatJson.messages(messagesRaw)
+        eq("cache order", listOf("b", "a"), messages.map { it.id })
+        eq("cache text", "первый", messages[0].text)
+    }
+
+    private fun serverSignals() {
+        val tunnel = ServerProfile(
+            id = "1", name = "t", color = 0,
+            mode = ConnectionMode.TUNNEL, sshHost = "10.0.0.1"
+        )
+        val local = ServerProfile(
+            id = "2", name = "l", color = 0,
+            mode = ConnectionMode.DIRECT, directUrl = "http://192.168.3.4:28894"
+        )
+        val awg = ServerProfile(
+            id = "3", name = "a", color = 0,
+            mode = ConnectionMode.DIRECT, directUrl = "http://10.8.0.3:4096"
+        )
+        val web = ServerProfile(
+            id = "4", name = "w", color = 0,
+            mode = ConnectionMode.DIRECT, directUrl = "https://opencode.example.com"
+        )
+        val online = ServerStatus(online = true, checkedAt = 1L)
+        val offline = ServerStatus(online = false, checkedAt = 1L)
+
+        eq("signal ssh", ServerSignal.Ssh, ServerSignal.color(tunnel, online))
+        eq("signal lan", ServerSignal.Local, ServerSignal.color(local, online))
+        eq("signal awg", ServerSignal.Local, ServerSignal.color(awg, online))
+        eq("signal web", ServerSignal.Web, ServerSignal.color(web, online))
+        eq("signal offline", ServerSignal.Offline, ServerSignal.color(local, offline))
+        eq(
+            "signal auth error",
+            ServerSignal.Offline,
+            ServerSignal.color(web, ServerStatus(error = "Сервер требует пароль OpenCode (401)"))
+        )
+        eq("signal unknown", ServerSignal.Ssh, ServerSignal.color(tunnel, ServerStatus()))
     }
 
     private fun passwords() {

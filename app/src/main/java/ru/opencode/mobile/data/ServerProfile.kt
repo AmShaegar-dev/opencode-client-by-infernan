@@ -191,6 +191,41 @@ object ServerColors {
     fun next(existing: List<ServerProfile>): Int = palette[existing.size % palette.size]
 }
 
+/**
+ * Цвет полоски у карточки сервера показывает не «личный цвет профиля», а тип
+ * подключения и доступность — так с первого взгляда понятно, куда идёт трафик:
+ *  - оранжевый — открытый веб (внешний адрес);
+ *  - голубой — SSH-туннель;
+ *  - фиолетовый — локальная сеть или AWG;
+ *  - красный — сервер недоступен.
+ */
+object ServerSignal {
+    val Web = 0xFFF5A524.toInt()
+    val Ssh = 0xFF5B8CFF.toInt()
+    val Local = 0xFF8B5CF6.toInt()
+    val Offline = 0xFFFF6B6B.toInt()
+
+    fun color(server: ServerProfile, status: ServerStatus): Int {
+        if (status.error.isNotBlank()) return Offline
+        if (status.checkedAt > 0L && !status.online) return Offline
+        return when {
+            server.mode == ConnectionMode.TUNNEL -> Ssh
+            UrlTools.isLocalUrl(server.directUrl) -> Local
+            else -> Web
+        }
+    }
+
+    fun label(server: ServerProfile, status: ServerStatus): String {
+        if (status.error.isNotBlank()) return "нет связи"
+        if (status.checkedAt > 0L && !status.online) return "нет связи"
+        return when {
+            server.mode == ConnectionMode.TUNNEL -> "SSH-туннель"
+            UrlTools.isLocalUrl(server.directUrl) -> "локальная сеть / AWG"
+            else -> "открытый веб"
+        }
+    }
+}
+
 object UrlTools {
     /** Приводит адрес к виду http://host:port без хвостового слеша. */
     fun normalize(raw: String): String? {

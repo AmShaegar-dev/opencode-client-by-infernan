@@ -4,8 +4,8 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
-val appVersionName = (findProperty("appVersionName") as String?)?.takeIf { it.isNotBlank() } ?: "1.0.8"
-val appVersionCode = (findProperty("appVersionCode") as String?)?.toIntOrNull() ?: 108
+val appVersionName = (findProperty("appVersionName") as String?)?.takeIf { it.isNotBlank() } ?: "1.0.9"
+val appVersionCode = (findProperty("appVersionCode") as String?)?.toIntOrNull() ?: 109
 
 android {
     namespace = "ru.opencode.mobile"
@@ -73,8 +73,9 @@ dependencies {
 
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
-    // SSH-установка OpenCode и локальный проброс порта.
+    // SSH-СѓСЃС‚Р°РЅРѕРІРєР° OpenCode Рё Р»РѕРєР°Р»СЊРЅС‹Р№ РїСЂРѕР±СЂРѕСЃ РїРѕСЂС‚Р°.
     implementation("com.github.mwiede:jsch:0.2.20")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
+

@@ -76,14 +76,16 @@ class OpenCodeApi(
         return client.newCall(builder.build())
     }
 
-    fun sessions(search: String = ""): List<SessionInfo> {
+    /** Сырой JSON списка сессий — его же сохраняем в шифрованный кэш. */
+    fun sessionsRaw(search: String = ""): String {
         val query = buildString {
             append("/api/session?limit=100&order=desc")
             if (search.isNotBlank()) append("&search=").append(encode(search))
         }
-        val root = JSONObject(get(query))
-        return ChatJson.sessions(root.optJSONArray("data") ?: JSONArray())
+        return get(query)
     }
+
+    fun sessions(search: String = ""): List<SessionInfo> = ChatJson.sessions(sessionsRaw(search))
 
     fun createSession(title: String? = null, model: ModelRef? = null): SessionInfo {
         val body = JSONObject().apply {
@@ -102,13 +104,12 @@ class OpenCodeApi(
         patch("/api/session/${encode(sessionId)}", JSONObject().put("title", title))
     }
 
-    fun messages(sessionId: String, limit: Int = 200): List<ChatMessage> {
-        val root = JSONObject(
-            get("/api/session/${encode(sessionId)}/message?limit=$limit&order=desc")
-        )
-        val array = root.optJSONArray("data") ?: JSONArray()
-        return ChatJson.messages(array).reversed()
-    }
+    /** Сырой JSON сообщений — основа шифрованного кэша чата. */
+    fun messagesRaw(sessionId: String, limit: Int = 200): String =
+        get("/api/session/${encode(sessionId)}/message?limit=$limit&order=desc")
+
+    fun messages(sessionId: String, limit: Int = 200): List<ChatMessage> =
+        ChatJson.messages(messagesRaw(sessionId, limit))
 
     fun prompt(sessionId: String, text: String, attachments: List<PromptAttachment> = emptyList()) {
         val body = JSONObject().put("text", text)

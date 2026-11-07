@@ -47,6 +47,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ru.opencode.mobile.AppViewModel
 import ru.opencode.mobile.data.ServerProfile
+import ru.opencode.mobile.data.ServerSignal
 import ru.opencode.mobile.ui.theme.Accent
 import ru.opencode.mobile.ui.theme.Bg
 import ru.opencode.mobile.ui.theme.Border
@@ -77,6 +78,12 @@ fun ServersScreen(vm: AppViewModel, modifier: Modifier = Modifier) {
                     }
                 }
             )
+
+            if (vm.servers.isNotEmpty()) {
+                ServerLegend(
+                    Modifier.padding(start = 16.dp, end = 16.dp, top = 2.dp, bottom = 6.dp)
+                )
+            }
 
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
@@ -143,6 +150,40 @@ fun ServersScreen(vm: AppViewModel, modifier: Modifier = Modifier) {
 }
 
 @Composable
+private fun ServerLegend(modifier: Modifier = Modifier) {
+    Row(
+        modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        LegendDot(ServerSignal.Web, "веб", Modifier.weight(1f))
+        LegendDot(ServerSignal.Ssh, "SSH", Modifier.weight(1f))
+        LegendDot(ServerSignal.Local, "локально/AWG", Modifier.weight(1.3f))
+        LegendDot(ServerSignal.Offline, "нет связи", Modifier.weight(1f))
+    }
+}
+
+@Composable
+private fun LegendDot(color: Int, label: String, modifier: Modifier = Modifier) {
+    Row(modifier, verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            Modifier
+                .size(6.dp)
+                .clip(CircleShape)
+                .background(Color(color))
+        )
+        Spacer(Modifier.width(4.dp))
+        Text(
+            label,
+            color = TextDim,
+            fontSize = 10.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+@Composable
 private fun ServerCard(
     vm: AppViewModel,
     server: ServerProfile,
@@ -154,6 +195,7 @@ private fun ServerCard(
 ) {
     var menu by remember { mutableStateOf(false) }
     val status = vm.statusOf(server.id)
+    val signal = ServerSignal.color(server, status)
 
     androidx.compose.material3.Surface(
         onClick = onOpen,
@@ -169,7 +211,7 @@ private fun ServerCard(
                 Modifier
                     .width(4.dp)
                     .fillMaxHeight()
-                    .background(Color(server.color))
+                    .background(Color(signal))
             )
             Column(Modifier.weight(1f).padding(14.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -177,12 +219,12 @@ private fun ServerCard(
                         Modifier
                             .size(38.dp)
                             .clip(RoundedCornerShape(11.dp))
-                            .background(Color(server.color).copy(alpha = 0.16f)),
+                            .background(Color(signal).copy(alpha = 0.16f)),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
                             server.name.take(1).uppercase(),
-                            color = Color(server.color),
+                            color = Color(signal),
                             fontWeight = FontWeight.Bold,
                             fontSize = 17.sp
                         )

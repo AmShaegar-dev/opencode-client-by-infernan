@@ -21,6 +21,7 @@ import kotlinx.coroutines.withContext
 import okhttp3.Call
 import org.json.JSONArray
 import org.json.JSONObject
+import ru.opencode.mobile.data.ChatCache
 import ru.opencode.mobile.data.ChatJson
 import ru.opencode.mobile.data.AgentInfo
 import ru.opencode.mobile.data.AppUpdate
@@ -178,6 +179,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     private val store = ServersStore(app)
     private val hub = ConnectionHub()
+    private val cache = ChatCache(app)
     private val uiPrefs = app.getSharedPreferences("opencode_ui", Application.MODE_PRIVATE)
 
     var servers by mutableStateOf(store.read())
@@ -817,11 +819,23 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     // ------------------------------------------------------------------
 
     fun refreshSessions(server: ServerProfile, query: String = sessions.query) {
+        // Сначала показываем сохранённый список — он открывается мгновенно,
+        // затем тихо заменяем свежим с сервера.
+        if (query.isBlank() && sessions.items.isEmpty()) {
+            cache.loadSessions(server.id)?.let { raw ->
+                runCatching { ChatJson.sessions(raw) }
+                    .getOrNull()
+                    ?.takeIf { it.isNotEmpty() }
+                    ?.let { cached -> sessions = SessionsUi(loading = true, items = cached, query = query) }
+            }
+        }
         sessions = sessions.copy(loading = true, error = "", query = query)
         viewModelScope.launch {
             try {
-                val items = io { hub.api(server).sessions(query) }
+                val raw = io { hub.api(server).sessionsRaw(query) }
+                val items = ChatJson.sessions(raw)
                 sessions = SessionsUi(loading = false, items = items, query = query)
+                if (query.isBlank()) io { cache.saveSessions(server.id, raw) }
             } catch (e: Exception) {
                 sessions = sessions.copy(loading = false, error = e.message ?: "Ошибка загрузки")
             }
@@ -1186,6 +1200,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             title = sessions.items.firstOrNull { it.id == sessionId }?.title.orEmpty(),
             loading = true
         )
+        // Мгновенно показываем сохранённую историю, пока идёт запрос к серверу.
+        viewModelScope.launch {
+            val cachedRaw = withContext(Dispatchers.IO) { cache.loadMessages(server.id, sessionId) }
+                ?: return@launch
+            val cached = runCatching { ChatJson.messages(cachedRaw) }.getOrNull().orEmpty()
+            if (cached.isNotEmpty() && chat.sessionId == sessionId && chat.messages.isEmpty()) {
+                chat = chat.copy(messages = cached)
+            }
+        }
         chatLoadJob = viewModelScope.launch {
             try {
                 val session = sessions.items.firstOrNull { it.id == sessionId }
@@ -1200,8 +1223,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     ?: ModelRef.parse(server.defaultModel)?.withVariant(server)
                     ?: loadedModels.firstOrNull { it.enabled }?.ref
 
-                val loaded = io { hub.api(server).messages(sessionId) }
+                val raw = io { hub.api(server).messagesRaw(sessionId) }
+                val loaded = ChatJson.messages(raw)
                 chat = chat.copy(messages = loaded, loading = false, sending = pollJob?.isActive == true)
+                io { cache.saveMessages(server.id, sessionId, raw, force = true) }
                 startEventStream(server, sessionId)
             } catch (e: Exception) {
                 chat = chat.copy(error = e.message ?: "Не удалось загрузить чат", loading = false)
@@ -1263,9 +1288,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (sessionId.isBlank()) return
         viewModelScope.launch {
             try {
-                val loaded = io { hub.api(server).messages(sessionId) }
+                val raw = io { hub.api(server).messagesRaw(sessionId) }
+                val loaded = ChatJson.messages(raw)
                 if (chat.sessionId == sessionId) {
                     chat = chat.copy(messages = loaded, error = "")
+                    io { cache.saveMessages(server.id, sessionId, raw, force = true) }
                 }
             } catch (e: Exception) {
                 if (chat.sessionId == sessionId) {
@@ -1413,6 +1440,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         )
 
         pollJob = viewModelScope.launch {
+            var lastRaw: String? = null
             try {
                 io { hub.api(server).prompt(sessionId, value, attachments) }
                 var attempts = 0
@@ -1422,8 +1450,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 while (isActive) {
                     delay(1000)
                     attempts++
-                    val loaded = try {
-                        io { hub.api(server).messages(sessionId) }.also { fetchFailures = 0 }
+                    val raw = try {
+                        io { hub.api(server).messagesRaw(sessionId) }.also { fetchFailures = 0 }
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
@@ -1431,6 +1459,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                         if (fetchFailures >= 6) throw e
                         continue
                     }
+                    lastRaw = raw
+                    val loaded = ChatJson.messages(raw)
                     if (chat.sessionId != sessionId) break
 
                     // При живом SSE не перетираем более свежий поток устаревшим
@@ -1467,6 +1497,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 chat = chat.copy(error = humanError(e, "Не удалось отправить сообщение"))
             } finally {
                 if (chat.sessionId == sessionId) chat = chat.copy(sending = false)
+                lastRaw?.let { raw ->
+                    runCatching { io { cache.saveMessages(server.id, sessionId, raw, force = true) } }
+                }
             }
         }
     }

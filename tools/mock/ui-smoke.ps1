@@ -134,6 +134,14 @@ TapText "Инструкция: сервер и вкладки"
 Start-Sleep -Seconds 1
 Check "guide screen" (HasText "компьютер и телефон")
 Check "guide server step" (HasText "Запустите сервер")
+Adb shell input swipe 540 1800 540 700 300 | Out-Null
+Start-Sleep -Milliseconds 800
+Check "guide bat button" (HasText "Скачать opencode-lan.bat")
+TapText "Скачать opencode-lan.bat"
+Start-Sleep -Seconds 2
+Check "bat save dialog" (HasText "opencode-lan.bat")
+Adb shell input keyevent 4 | Out-Null
+Start-Sleep -Milliseconds 700
 TapText "Назад"
 Start-Sleep -Milliseconds 700
 Check "back to settings" (HasText "Проверить обновление")
@@ -343,6 +351,10 @@ Adb shell input keyevent 4 | Out-Null
 Start-Sleep -Seconds 1
 Shot "15_back_servers"
 Check "back returns to servers" (HasText "Добавить сервер")
+Check "legend web" (HasText "веб")
+Check "legend ssh" (HasText "SSH")
+Check "legend local" (HasText "локально/AWG")
+Check "legend offline" (HasText "нет связи")
 
 $crashes = Adb logcat -d 2>$null | Select-String -Pattern "FATAL EXCEPTION|AndroidRuntime.*ru.opencode.mobile"
 if ($crashes) {

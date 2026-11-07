@@ -232,6 +232,10 @@ object ChatJson {
         }
     }
 
+    /** Сырой ответ `/api/session` (в том числе из шифрованного кэша). */
+    fun sessions(raw: String): List<SessionInfo> =
+        sessions(JSONObject(raw).optJSONArray("data") ?: JSONArray())
+
     fun model(o: JSONObject): ModelInfo {
         val costs = o.optJSONArray("cost")
         // Нулевые цены (в том числе массив из нулей) — бесплатная модель.
@@ -561,6 +565,13 @@ object ChatJson {
             array.optJSONObject(i)?.let { message(it)?.let(::add) }
         }
     }
+
+    /**
+     * Сырой ответ `/api/session/{id}/message`. Сервер отдаёт новые сообщения
+     * первыми (`order=desc`), для чата разворачиваем в хронологический порядок.
+     */
+    fun messages(raw: String): List<ChatMessage> =
+        messages(JSONObject(raw).optJSONArray("data") ?: JSONArray()).reversed()
 
     private fun pretty(o: JSONObject): String = runCatching { o.toString(2) }.getOrDefault(o.toString())
 }
