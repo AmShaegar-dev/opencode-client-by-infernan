@@ -41,6 +41,7 @@ import ru.opencode.mobile.data.ServerProfile
 import ru.opencode.mobile.data.ServerStatus
 import ru.opencode.mobile.data.ServersStore
 import ru.opencode.mobile.data.SessionInfo
+import ru.opencode.mobile.data.TextCleaner
 import ru.opencode.mobile.data.ToolCall
 import ru.opencode.mobile.data.UpdateChecker
 import ru.opencode.mobile.data.UsageLimitsInfo
@@ -986,7 +987,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 if (id.isBlank()) return
                 val p = part(id, eventTime(event))
                 p.texts.getOrPut(data.optInt("ordinal", 0)) { StringBuilder() }
-                    .append(data.optString("delta"))
+                    .append(TextCleaner.clean(data.optString("delta")))
                 upsertStreamMessage(sessionId, id, p)
             }
 
@@ -994,7 +995,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 val id = data.optString("assistantMessageID")
                 if (id.isBlank()) return
                 val p = part(id, eventTime(event))
-                p.texts[data.optInt("ordinal", 0)] = StringBuilder(data.optString("text"))
+                p.texts[data.optInt("ordinal", 0)] =
+                    StringBuilder(TextCleaner.clean(data.optString("text")))
                 upsertStreamMessage(sessionId, id, p)
             }
 
@@ -1011,7 +1013,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 if (id.isBlank()) return
                 val p = part(id, eventTime(event))
                 p.reasonings.getOrPut(data.optInt("ordinal", 0)) { StringBuilder() }
-                    .append(data.optString("delta"))
+                    .append(TextCleaner.clean(data.optString("delta")))
                 upsertStreamMessage(sessionId, id, p)
             }
 
@@ -1019,7 +1021,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 val id = data.optString("assistantMessageID")
                 if (id.isBlank()) return
                 val p = part(id, eventTime(event))
-                p.reasonings[data.optInt("ordinal", 0)] = StringBuilder(data.optString("text"))
+                p.reasonings[data.optInt("ordinal", 0)] =
+                    StringBuilder(TextCleaner.clean(data.optString("text")))
                 upsertStreamMessage(sessionId, id, p)
             }
 
@@ -1042,7 +1045,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 val p = part(id, eventTime(event))
                 val toolId = data.optString("id")
                 val tool = p.tools[toolId] ?: ToolCall("", "streaming", "", "")
-                p.tools[toolId] = tool.copy(input = tool.input + data.optString("delta"))
+                p.tools[toolId] = tool.copy(input = tool.input + TextCleaner.clean(data.optString("delta")))
                 upsertStreamMessage(sessionId, id, p)
             }
 
@@ -1052,7 +1055,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 val p = part(id, eventTime(event))
                 val toolId = data.optString("id")
                 val tool = p.tools[toolId] ?: ToolCall("", "streaming", "", "")
-                p.tools[toolId] = tool.copy(input = data.optString("text"))
+                p.tools[toolId] = tool.copy(input = TextCleaner.clean(data.optString("text")))
                 upsertStreamMessage(sessionId, id, p)
             }
 
@@ -1064,7 +1067,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 val tool = p.tools[toolId] ?: ToolCall("", "running", "", "")
                 p.tools[toolId] = tool.copy(
                     status = "running",
-                    input = data.optJSONObject("input")?.toString(2) ?: tool.input
+                    input = TextCleaner.clean(data.optJSONObject("input")?.toString(2) ?: tool.input)
                 )
                 upsertStreamMessage(sessionId, id, p)
             }
@@ -1077,7 +1080,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 val tool = p.tools[toolId] ?: ToolCall("", "completed", "", "")
                 p.tools[toolId] = tool.copy(
                     status = "completed",
-                    output = toolOutput(data.optJSONArray("content"))
+                    output = TextCleaner.clean(toolOutput(data.optJSONArray("content")))
                 )
                 upsertStreamMessage(sessionId, id, p)
             }
@@ -1090,8 +1093,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 val tool = p.tools[toolId] ?: ToolCall("", "error", "", "")
                 p.tools[toolId] = tool.copy(
                     status = "error",
-                    output = data.optJSONObject("error")?.optString("message")
-                        ?: toolOutput(data.optJSONArray("content"))
+                    output = TextCleaner.clean(
+                        data.optJSONObject("error")?.optString("message")
+                            ?: toolOutput(data.optJSONArray("content"))
+                    )
                 )
                 upsertStreamMessage(sessionId, id, p)
             }

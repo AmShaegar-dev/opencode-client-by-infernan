@@ -207,7 +207,7 @@ object ChatJson {
         val time = o.optJSONObject("time")
         return SessionInfo(
             id = o.optString("id"),
-            title = o.optString("title"),
+            title = TextCleaner.clean(o.optString("title")),
             created = epochSeconds(time?.opt("created")),
             updated = epochSeconds(time?.opt("updated")),
             cost = o.optDouble("cost", 0.0),
@@ -459,7 +459,7 @@ object ChatJson {
                 return ChatMessage(
                     id = id,
                     role = "user",
-                    text = o.optString("text"),
+                    text = TextCleaner.clean(o.optString("text")),
                     created = time,
                     files = files
                 )
@@ -501,20 +501,25 @@ object ChatJson {
                 return ChatMessage(
                     id = id,
                     role = "assistant",
-                    text = text.toString().trim(),
-                    reasoning = reasoning.toString().trim(),
+                    text = TextCleaner.clean(text.toString().trim()),
+                    reasoning = TextCleaner.clean(reasoning.toString().trim()),
                     tools = tools,
                     created = time,
                     completed = completed,
                     modelLabel = modelRef?.key.orEmpty(),
-                    error = error
+                    error = TextCleaner.clean(error)
                 )
             }
 
             "system", "synthetic", "shell" -> {
                 val value = o.optString("text").ifBlank { o.optString("command") }
                 if (value.isBlank()) return null
-                return ChatMessage(id = id, role = "hidden", text = value, created = time)
+                return ChatMessage(
+                    id = id,
+                    role = "hidden",
+                    text = TextCleaner.clean(value),
+                    created = time
+                )
             }
 
             else -> return null
@@ -546,8 +551,8 @@ object ChatJson {
         return ToolCall(
             name = o.optString("name").ifBlank { "tool" },
             status = status,
-            input = input,
-            output = output
+            input = TextCleaner.clean(input),
+            output = TextCleaner.clean(output)
         )
     }
 

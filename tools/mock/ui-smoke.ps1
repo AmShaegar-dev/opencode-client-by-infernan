@@ -220,9 +220,18 @@ Check "reasoning text hidden" (-not (HasText "Размышление mock-мод
 TapText "Размышления"
 Start-Sleep -Seconds 1
 Check "reasoning expands" (HasText "Размышление mock-модели")
-TapText "Скрыть размышления"
+TapText "Свернуть детали"
 Start-Sleep -Milliseconds 700
 Check "reasoning hides again" (-not (HasText "Размышление mock-модели"))
+
+# Меню вложения: выбор из галереи и несколько файлов сразу.
+TapText "Прикрепить файл"
+Start-Sleep -Seconds 1
+Check "gallery picker offered" (HasText "Фото из галереи")
+Check "multi file picker offered" (HasText "Файлы (можно несколько)")
+Adb shell input keyevent 4 | Out-Null
+Start-Sleep -Milliseconds 700
+Check "attachment menu closed" (-not (HasText "Фото из галереи"))
 
 # --- Выбор моделей: включение и выключение через API сервера --------
 TapText "Mock Free Model" 1500

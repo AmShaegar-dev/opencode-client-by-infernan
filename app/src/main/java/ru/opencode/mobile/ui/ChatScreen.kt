@@ -6,6 +6,7 @@ import android.content.Context
 import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -49,6 +50,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
@@ -101,9 +103,11 @@ import ru.opencode.mobile.AppViewModel
 import ru.opencode.mobile.Attachments
 import ru.opencode.mobile.data.AgentInfo
 import ru.opencode.mobile.data.ChatMessage
+import ru.opencode.mobile.data.ChatDisplay
 import ru.opencode.mobile.data.ModelInfo
 import ru.opencode.mobile.data.PromptAttachment
 import ru.opencode.mobile.data.ServerProfile
+import ru.opencode.mobile.data.TextCleaner
 import ru.opencode.mobile.data.ToolCall
 import ru.opencode.mobile.ui.theme.Accent
 import ru.opencode.mobile.ui.theme.AccentSoft
@@ -136,6 +140,7 @@ fun ChatScreen(vm: AppViewModel, server: ServerProfile, modifier: Modifier = Mod
     var input by remember(chat.sessionId) { mutableStateOf("") }
     var attachments by remember(chat.sessionId) { mutableStateOf(listOf<PromptAttachment>()) }
     var attaching by remember { mutableStateOf(false) }
+    var attachMenu by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     fun toast(message: String) = Toast.makeText(context, message, Toast.LENGTH_LONG).show()
@@ -151,7 +156,9 @@ fun ChatScreen(vm: AppViewModel, server: ServerProfile, modifier: Modifier = Mod
             vm.uploadToServer(server, uri) { result ->
                 result
                     .onSuccess { path ->
-                        if (attachToMessage && (size == null || size <= Attachments.MAX_BYTES)) {
+                        if (attachToMessage && (size == null || size <= Attachments.MAX_BYTES) &&
+                            attachments.size < 5
+                        ) {
                             attachments = attachments + Attachments.serverFile(path, name, size ?: 0L)
                             toast("Файл прикреплён с сервера")
                         } else {
@@ -169,37 +176,61 @@ fun ChatScreen(vm: AppViewModel, server: ServerProfile, modifier: Modifier = Mod
         }
     }
 
-    val attachLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocument()
-    ) { uri ->
-        if (uri != null) {
+    /**
+     * Прикрепляет несколько файлов сразу. Картинки и небольшие документы
+     * уходят в сообщение как вложения, крупные — на сервер.
+     */
+    fun addAttachments(uris: List<Uri>) {
+        if (uris.isEmpty()) return
+        scope.launch {
             attaching = true
-            scope.launch {
+            val prepared = mutableListOf<PromptAttachment>()
+            val fallback = mutableListOf<Pair<Uri, Long?>>()
+            var skipped = 0
+            for (uri in uris) {
+                val index = attachments.size + prepared.size
+                if (index >= 5) {
+                    skipped++
+                    continue
+                }
                 val size = withContext(Dispatchers.IO) { Attachments.sizeOf(context, uri) }
                 if (size != null && size > Attachments.MAX_BYTES) {
-                    attaching = false
-                    toast("Файл больше 20 МБ — загружаю на сервер и подставлю путь…")
-                    uploadServerFile(uri, attachToMessage = false, knownSize = size)
-                    return@launch
+                    fallback += uri to size
+                    continue
                 }
                 val attachment = withContext(Dispatchers.IO) { Attachments.prepare(context, uri) }
-                attaching = false
-                when {
-                    attachment == null -> {
-                        toast("Файл не проходит как вложение — загружаю на сервер и прикрепляю…")
-                        uploadServerFile(uri, attachToMessage = true, knownSize = size)
-                    }
-                    attachments.size >= 5 -> toast("Можно прикрепить до 5 файлов")
-                    else -> attachments = attachments + attachment
+                if (attachment == null) fallback += uri to size else prepared += attachment
+            }
+            if (prepared.isNotEmpty()) attachments = attachments + prepared
+            attaching = false
+            if (prepared.isNotEmpty()) {
+                toast(if (prepared.size == 1) "Файл прикреплён" else "Прикреплено файлов: ${prepared.size}")
+            }
+            if (skipped > 0) toast("Можно прикрепить до 5 файлов")
+            fallback.forEach { (uri, size) ->
+                if (attachments.size < 5) {
+                    uploadServerFile(uri, attachToMessage = true, knownSize = size)
                 }
             }
         }
     }
 
+    val attachLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris ->
+        addAttachments(uris)
+    }
+
+    val galleryLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickMultipleVisualMedia(5)
+    ) { uris ->
+        addAttachments(uris)
+    }
+
     val uploadLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocument()
-    ) { uri ->
-        if (uri != null) uploadServerFile(uri, attachToMessage = true)
+        ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris ->
+        uris.forEach { uri -> uploadServerFile(uri, attachToMessage = true) }
     }
 
     val exportLauncher = rememberLauncherForActivityResult(
@@ -212,12 +243,14 @@ fun ChatScreen(vm: AppViewModel, server: ServerProfile, modifier: Modifier = Mod
         }
     }
 
-    val lastStreamLength = chat.messages.lastOrNull()?.let {
+    // Подряд идущие шаги модели (размышление + инструмент) показываем одним блоком.
+    val displayed = remember(chat.messages) { ChatDisplay.merge(chat.messages) }
+    val lastStreamLength = displayed.lastOrNull()?.message?.let {
         it.text.length + it.reasoning.length + it.tools.size
     } ?: 0
     LaunchedEffect(chat.messages.size, chat.sending, lastStreamLength) {
-        if (chat.messages.isNotEmpty()) {
-            runCatching { listState.animateScrollToItem(chat.messages.lastIndex) }
+        if (displayed.isNotEmpty()) {
+            runCatching { listState.animateScrollToItem(displayed.lastIndex) }
         }
     }
 
@@ -393,7 +426,7 @@ fun ChatScreen(vm: AppViewModel, server: ServerProfile, modifier: Modifier = Mod
             contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            if (chat.messages.isEmpty() && !chat.loading) {
+            if (displayed.isEmpty() && !chat.loading) {
                 item {
                     EmptyState(
                         title = "Чат пуст",
@@ -402,8 +435,12 @@ fun ChatScreen(vm: AppViewModel, server: ServerProfile, modifier: Modifier = Mod
                     )
                 }
             }
-            items(chat.messages, key = { it.id }) { message ->
-                MessageItem(message, isLast = message.id == chat.messages.lastOrNull()?.id, sending = chat.sending)
+            items(displayed, key = { it.message.id }) { item ->
+                MessageItem(
+                    item.message,
+                    isLast = item.message.id == displayed.lastOrNull()?.message?.id,
+                    sending = chat.sending
+                )
             }
             if (chat.sending) {
                 item {
@@ -528,20 +565,45 @@ fun ChatScreen(vm: AppViewModel, server: ServerProfile, modifier: Modifier = Mod
                     Spacer(Modifier.height(6.dp))
                 }
                 Row(verticalAlignment = Alignment.Bottom) {
-                    androidx.compose.material3.FilledIconButton(
-                        onClick = { attachLauncher.launch(arrayOf("*/*")) },
-                        modifier = Modifier.size(50.dp),
-                        enabled = !chat.sending && !attaching,
-                        colors = IconButtonDefaults.filledIconButtonColors(
-                            containerColor = Surface1,
-                            contentColor = if (attaching) TextDim else TextMain
-                        ),
-                        shape = RoundedCornerShape(14.dp)
-                    ) {
-                        if (attaching) {
-                            CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = Accent)
-                        } else {
-                            Icon(Icons.Filled.AttachFile, contentDescription = "Прикрепить файл")
+                    Box {
+                        androidx.compose.material3.FilledIconButton(
+                            onClick = { attachMenu = true },
+                            modifier = Modifier.size(50.dp),
+                            enabled = !chat.sending && !attaching,
+                            colors = IconButtonDefaults.filledIconButtonColors(
+                                containerColor = Surface1,
+                                contentColor = if (attaching) TextDim else TextMain
+                            ),
+                            shape = RoundedCornerShape(14.dp)
+                        ) {
+                            if (attaching) {
+                                CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = Accent)
+                            } else {
+                                Icon(Icons.Filled.AttachFile, contentDescription = "Прикрепить файл")
+                            }
+                        }
+                        DropdownMenu(
+                            expanded = attachMenu,
+                            onDismissRequest = { attachMenu = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Фото из галереи", color = TextMain) },
+                                leadingIcon = { Icon(Icons.Filled.PhotoLibrary, null, tint = Accent) },
+                                onClick = {
+                                    attachMenu = false
+                                    galleryLauncher.launch(
+                                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                    )
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Файлы (можно несколько)", color = TextMain) },
+                                leadingIcon = { Icon(Icons.Filled.AttachFile, null, tint = Accent) },
+                                onClick = {
+                                    attachMenu = false
+                                    attachLauncher.launch(arrayOf("*/*"))
+                                }
+                            )
                         }
                     }
                     Spacer(Modifier.width(8.dp))
@@ -771,11 +833,9 @@ fun ChatScreen(vm: AppViewModel, server: ServerProfile, modifier: Modifier = Mod
         val matches = if (searchQuery.isBlank()) {
             emptyList()
         } else {
-            chat.messages.filter { message ->
-                !message.isHidden && (
-                    message.text.contains(searchQuery, ignoreCase = true) ||
-                        message.reasoning.contains(searchQuery, ignoreCase = true)
-                    )
+            displayed.filter { item ->
+                item.message.text.contains(searchQuery, ignoreCase = true) ||
+                    item.message.reasoning.contains(searchQuery, ignoreCase = true)
             }
         }
         AlertDialog(
@@ -804,8 +864,9 @@ fun ChatScreen(vm: AppViewModel, server: ServerProfile, modifier: Modifier = Mod
                         Text("Ничего не найдено", color = TextMuted, fontSize = 12.sp)
                     }
                     LazyColumn(Modifier.heightIn(max = 360.dp)) {
-                        items(matches, key = { it.id }) { message ->
-                            val index = chat.messages.indexOf(message)
+                        items(matches, key = { it.message.id }) { item ->
+                            val index = displayed.indexOf(item)
+                            val message = item.message
                             Column(
                                 Modifier
                                     .fillMaxWidth()
@@ -930,8 +991,7 @@ private fun MessageItem(message: ChatMessage, isLast: Boolean, sending: Boolean)
         return
     }
 
-    var reasoningOpen by remember(message.id) { mutableStateOf(false) }
-    var toolsOpen by remember(message.id) { mutableStateOf(false) }
+    var activityOpen by remember(message.id) { mutableStateOf(false) }
 
     Surface(
         color = Surface1,
@@ -965,27 +1025,48 @@ private fun MessageItem(message: ChatMessage, isLast: Boolean, sending: Boolean)
                 }
             }
 
-            if (message.reasoning.isNotBlank()) {
+            if (message.reasoning.isNotBlank() || message.tools.isNotEmpty()) {
                 Spacer(Modifier.height(6.dp))
-                Text(
-                    if (reasoningOpen) {
-                        "Скрыть размышления ▴"
-                    } else {
-                        "Размышления (${message.reasoning.length}) ▾"
-                    },
-                    color = Blue,
-                    fontSize = 11.sp,
-                    modifier = Modifier.clickable { reasoningOpen = !reasoningOpen }
-                )
-                if (reasoningOpen) {
-                    Spacer(Modifier.height(4.dp))
-                    SelectionContainer {
-                        Text(
-                            message.reasoning,
-                            color = TextDim,
-                            fontSize = 12.sp,
-                            lineHeight = 17.sp
-                        )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { activityOpen = !activityOpen }
+                ) {
+                    Icon(
+                        if (activityOpen) Icons.Filled.Build else Icons.Filled.Tune,
+                        null,
+                        tint = Blue,
+                        modifier = Modifier.size(13.dp)
+                    )
+                    Spacer(Modifier.width(5.dp))
+                    Text(
+                        if (activityOpen) "Свернуть детали ▴" else activitySummary(message),
+                        color = Blue,
+                        fontSize = 11.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                if (activityOpen) {
+                    // Даже раскрытые детали не должны занимать весь экран:
+                    // длинную цепочку шагов можно листать внутри блока.
+                    Column(
+                        Modifier
+                            .heightIn(max = 320.dp)
+                            .verticalScroll(rememberScrollState())
+                    ) {
+                        if (message.reasoning.isNotBlank()) {
+                            Spacer(Modifier.height(4.dp))
+                            MarkdownText(
+                                message.reasoning,
+                                color = TextDim,
+                                fontSize = 12.sp,
+                                lineHeight = 17.sp
+                            )
+                        }
+                        message.tools.forEach { ToolCallCard(it) }
                     }
                 }
             }
@@ -993,25 +1074,6 @@ private fun MessageItem(message: ChatMessage, isLast: Boolean, sending: Boolean)
             if (message.text.isNotBlank()) {
                 Spacer(Modifier.height(6.dp))
                 SelectionContainer { RichText(message.text) }
-            }
-
-            if (message.tools.isNotEmpty()) {
-                Spacer(Modifier.height(8.dp))
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.clickable { toolsOpen = !toolsOpen }
-                ) {
-                    Icon(Icons.Filled.Build, null, tint = TextMuted, modifier = Modifier.size(13.dp))
-                    Spacer(Modifier.width(5.dp))
-                    Text(
-                        "Инструменты: ${message.tools.size}${if (toolsOpen) " ▴" else " ▾"}",
-                        color = TextMuted,
-                        fontSize = 11.sp
-                    )
-                }
-                if (toolsOpen) {
-                    message.tools.forEach { ToolCallCard(it) }
-                }
             }
 
             if (message.error.isNotBlank()) {
@@ -1063,32 +1125,50 @@ private fun ToolCallCard(tool: ToolCall) {
             if (open) {
                 if (tool.input.isNotBlank()) {
                     Spacer(Modifier.height(5.dp))
-                    CodeBlock(tool.input.take(1500))
+                    CodeBlock(TextCleaner.clean(tool.input.take(1500)))
                 }
                 if (tool.output.isNotBlank()) {
                     Spacer(Modifier.height(5.dp))
-                    CodeBlock(tool.output.take(3000))
+                    CodeBlock(TextCleaner.clean(tool.output.take(3000)))
                 }
             }
         }
     }
 }
 
-/** Простейший рендер: текст + блоки ```…``` моноширинным. */
+/**
+ * Одна строка про состояние модели: «Думает · Размышления · 12 инстр. ▾».
+ * Так даже длинная цепочка шагов не превращается в стену логов.
+ */
+private fun activitySummary(message: ChatMessage): String {
+    val parts = buildList {
+        if (message.reasoning.isNotBlank()) add("Размышления")
+        if (message.tools.isNotEmpty()) {
+            add(
+                if (message.tools.size == 1) "1 инструмент"
+                else "${message.tools.size} инстр."
+            )
+        }
+    }
+    val prefix = if (!message.completed) "Думает · " else ""
+    return prefix + parts.joinToString(" · ") + " ▾"
+}
+
+/** Текст с блоками ```…``` и простым Markdown. */
 @Composable
 fun RichText(text: String) {
     val segments = text.split("```")
     if (segments.size == 1) {
-        Text(text, color = TextMain, fontSize = 14.sp, lineHeight = 20.sp)
+        MarkdownText(text)
         return
     }
     Column {
         segments.forEachIndexed { index, segment ->
             if (index % 2 == 1) {
                 val body = segment.substringAfter('\n', segment)
-                CodeBlock(body.trimEnd())
+                CodeBlock(TextCleaner.clean(body.trimEnd()))
             } else if (segment.isNotBlank()) {
-                Text(segment.trim(), color = TextMain, fontSize = 14.sp, lineHeight = 20.sp)
+                MarkdownText(segment.trim())
             }
             if (index != segments.lastIndex) Spacer(Modifier.height(6.dp))
         }

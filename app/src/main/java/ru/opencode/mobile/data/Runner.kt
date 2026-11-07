@@ -44,6 +44,8 @@ object Runner {
         profiles()
         updateVersions()
         updateManifest()
+        textCleaner()
+        displayMerge()
         passwords()
         println()
         println(if (failures == 0) "ALL CHECKS PASSED ($passed)" else "FAILURES: $failures (passed $passed)")
@@ -537,6 +539,61 @@ object Runner {
             derived?.assetUrl?.contains("OpenCode-Client-by-inFernan-v2.0.0.apk") == true
         }
         check("manifest v-prefix stripped") { derived?.version == "2.0.0" }
+    }
+
+    private fun textCleaner() {
+        eq("ansi stripped", "red", TextCleaner.clean("\u001B[31mred\u001B[0m"))
+        eq("control stripped", "ab", TextCleaner.clean("a\u0007b"))
+        eq("cp866 repaired", "умолчанию", TextCleaner.clean("╤Г╨╝╨╛╨╗╤З╨░╨╜╨╕╤О"))
+        eq("tree kept", "└── src", TextCleaner.clean("└── src"))
+        eq("replacement marked", "a?b", TextCleaner.clean("a\uFFFDb"))
+        eq("fake replacement collapsed", "a?b", TextCleaner.clean("aя┐╜b"))
+        eq("plain text kept", "Привет, мир!", TextCleaner.clean("Привет, мир!"))
+    }
+
+    private fun displayMerge() {
+        val merged = ChatDisplay.merge(
+            listOf(
+                ChatMessage(
+                    id = "a1",
+                    role = "assistant",
+                    text = "",
+                    reasoning = "r1",
+                    tools = listOf(ToolCall("shell", "completed", "echo", "ok")),
+                    completed = true
+                ),
+                ChatMessage(
+                    id = "a2",
+                    role = "assistant",
+                    text = "Итог",
+                    reasoning = "r2",
+                    tools = listOf(ToolCall("edit", "completed", "patch", "")),
+                    completed = true
+                ),
+                ChatMessage(id = "u1", role = "user", text = "привет")
+            )
+        )
+        eq("merged count", 2, merged.size)
+        eq("merged reasoning", "r1\n\nr2", merged[0].message.reasoning)
+        eq("merged text", "Итог", merged[0].message.text)
+        eq("merged tools", 2, merged[0].message.tools.size)
+        eq("merged sources", listOf("a1", "a2"), merged[0].sourceIds)
+        eq("user stays separate", "u1", merged[1].message.id)
+
+        val withHidden = ChatDisplay.merge(
+            listOf(
+                ChatMessage(id = "a1", role = "assistant", text = "", completed = true),
+                ChatMessage(id = "h1", role = "hidden", text = "shell"),
+                ChatMessage(id = "a2", role = "assistant", text = "ok", completed = true)
+            )
+        )
+        eq("hidden skipped", 1, withHidden.size)
+        eq("hidden bridges run", 2, withHidden[0].sourceIds.size)
+
+        val single = ChatDisplay.merge(
+            listOf(ChatMessage(id = "solo", role = "assistant", text = "ok", completed = true))
+        )
+        eq("single run stable id", "run_solo", single[0].message.id)
     }
 
     private fun passwords() {
