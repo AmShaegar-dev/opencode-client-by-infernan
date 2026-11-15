@@ -279,6 +279,16 @@ function handle(req, res, body) {
     return;
   }
 
+  if (method === "GET" && path.startsWith("/api/fs/read/")) {
+    const name = decodeURIComponent(path.slice("/api/fs/read/".length));
+    const content = "Mock file: " + name + "\nСтрока 2: содержимое с сервера.\n";
+    res.writeHead(200, {
+      "Content-Type": "text/plain; charset=utf-8",
+      "Content-Length": Buffer.byteLength(content),
+    });
+    return res.end(content);
+  }
+
   if (method === "GET" && path === "/api/session") {
     const search = (url.searchParams.get("search") || "").toLowerCase();
     const data = order
@@ -682,13 +692,24 @@ seed.messages.push({
   agent: "build",
   model: { id: "free-model", providerID: "mock" },
   content: [
-    { type: "text", text: "Я mock-сервер OpenCode. Могу читать файлы, запускать команды и писать код." },
+    { type: "text", text: "Я mock-сервер OpenCode. Могу читать файлы, запускать команды и писать код. Готово: `C:\\Projects\\demo\\README.md`." },
     {
       type: "tool",
       id: "tool_seed",
       name: "bash",
       state: { status: "completed", input: { command: "uname -a" }, content: [{ type: "text", text: "Linux mock 6.0" }] },
       time: { created: now() - 58 },
+    },
+    {
+      type: "tool",
+      id: "tool_seed_write",
+      name: "write",
+      state: {
+        status: "completed",
+        input: { path: "C:\\Projects\\demo\\README.md", content: "# Demo" },
+        content: [{ type: "text", text: "Wrote README.md" }],
+      },
+      time: { created: now() - 57 },
     },
   ],
 });

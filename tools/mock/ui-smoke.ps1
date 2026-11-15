@@ -209,6 +209,21 @@ TapText "Приветственный чат"
 Start-Sleep -Seconds 3
 Shot "05_chat"
 
+# --- Файл из ответа: карточка, предпросмотр и скачивание ------------
+Check "response file card" (HasText "README.md")
+Check "file open action" (HasText "Открыть")
+TapText "Открыть"
+Start-Sleep -Seconds 2
+Shot "05_file_preview"
+Check "file preview fetched" (HasText "Mock file:")
+TapText "Закрыть"
+Start-Sleep -Milliseconds 500
+TapText "Скачать на телефон"
+Start-Sleep -Seconds 2
+Check "file save dialog" (HasText "README.md")
+Adb shell input keyevent 4 | Out-Null
+Start-Sleep -Milliseconds 700
+
 # --- Отправка сообщения (клавиатуру прячем до нажатия «отправить») --
 Tap 400 2250
 TypeText "SmokeTest"

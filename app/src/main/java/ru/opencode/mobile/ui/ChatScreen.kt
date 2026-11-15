@@ -3,12 +3,14 @@
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -45,6 +47,7 @@ import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Image
@@ -90,6 +93,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -101,9 +106,13 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import ru.opencode.mobile.AppViewModel
 import ru.opencode.mobile.Attachments
+import ru.opencode.mobile.FilePreviewState
 import ru.opencode.mobile.data.AgentInfo
 import ru.opencode.mobile.data.ChatMessage
 import ru.opencode.mobile.data.ChatDisplay
+import ru.opencode.mobile.data.FileKind
+import ru.opencode.mobile.data.FileRef
+import ru.opencode.mobile.data.FileRefs
 import ru.opencode.mobile.data.ModelInfo
 import ru.opencode.mobile.data.PromptAttachment
 import ru.opencode.mobile.data.ServerProfile
@@ -225,6 +234,27 @@ fun ChatScreen(vm: AppViewModel, server: ServerProfile, modifier: Modifier = Mod
         ActivityResultContracts.PickMultipleVisualMedia(5)
     ) { uris ->
         addAttachments(uris)
+    }
+
+    // Скачивание файла из ответа: один общий SAF-лаунчер на экран.
+    var pendingDownload by remember { mutableStateOf<FileRef?>(null) }
+    val fileSaveLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("*/*")
+    ) { uri ->
+        val ref = pendingDownload
+        pendingDownload = null
+        if (uri != null && ref != null) {
+            vm.downloadFile(server, ref, uri) { result ->
+                result
+                    .onSuccess { toast("Сохранено: $it") }
+                    .onFailure { toast(it.message ?: "Не удалось скачать файл") }
+            }
+        }
+    }
+
+    fun download(ref: FileRef) {
+        pendingDownload = ref
+        fileSaveLauncher.launch(ref.name)
     }
 
     val uploadLauncher = rememberLauncherForActivityResult(
@@ -439,7 +469,9 @@ fun ChatScreen(vm: AppViewModel, server: ServerProfile, modifier: Modifier = Mod
                 MessageItem(
                     item.message,
                     isLast = item.message.id == displayed.lastOrNull()?.message?.id,
-                    sending = chat.sending
+                    sending = chat.sending,
+                    onPreview = { vm.previewFile(server, it) },
+                    onDownload = { download(it) }
                 )
             }
             if (chat.sending) {
@@ -934,12 +966,32 @@ fun ChatScreen(vm: AppViewModel, server: ServerProfile, modifier: Modifier = Mod
             containerColor = Surface2
         )
     }
+
+    vm.filePreview?.let { state ->
+        FilePreviewDialog(
+            state = state,
+            onClose = { vm.closeFilePreview() },
+            onDownload = {
+                vm.closeFilePreview()
+                download(FileRef(state.path, state.name, state.kind))
+            }
+        )
+    }
 }
 
 @Composable
-private fun MessageItem(message: ChatMessage, isLast: Boolean, sending: Boolean) {
+private fun MessageItem(
+    message: ChatMessage,
+    isLast: Boolean,
+    sending: Boolean,
+    onPreview: (FileRef) -> Unit = {},
+    onDownload: (FileRef) -> Unit = {}
+) {
     if (message.isHidden) return
     val context = LocalContext.current
+    val fileRefs = remember(message.id, message.text, message.tools) {
+        FileRefs.fromMessage(message)
+    }
     fun copyMessage() {
         val text = message.text.ifBlank { message.reasoning }
         if (text.isBlank()) return
@@ -956,7 +1008,12 @@ private fun MessageItem(message: ChatMessage, isLast: Boolean, sending: Boolean)
                 modifier = Modifier.fillMaxWidth(0.88f)
             ) {
                 Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+                    // Строку «Файл на сервере: …» заменяет карточка файла с кнопками.
                     val body = message.displayText
+                        .lineSequence()
+                        .filterNot { it.contains("Файл на сервере:") }
+                        .joinToString("\n")
+                        .trim()
                     val files = message.files
                     if (body.isNotEmpty()) {
                         SelectionContainer {
@@ -984,6 +1041,12 @@ private fun MessageItem(message: ChatMessage, isLast: Boolean, sending: Boolean)
                         }
                     } else if (body.isEmpty()) {
                         Text("📎 вложение", color = TextMuted, fontSize = 12.sp)
+                    }
+                    if (fileRefs.isNotEmpty()) {
+                        if (body.isNotEmpty() || files.isNotEmpty()) Spacer(Modifier.height(8.dp))
+                        fileRefs.forEach { ref ->
+                            FileRefRow(ref, onPreview, onDownload)
+                        }
                     }
                 }
             }
@@ -1081,8 +1144,199 @@ private fun MessageItem(message: ChatMessage, isLast: Boolean, sending: Boolean)
                 Text("Ошибка: ${message.error.take(800)}", color = Red, fontSize = 12.sp)
             }
 
+            if (fileRefs.isNotEmpty()) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    if (fileRefs.size == 1) "Файл" else "Файлы",
+                    color = TextDim,
+                    fontSize = 10.sp
+                )
+                Spacer(Modifier.height(4.dp))
+                fileRefs.forEach { ref ->
+                    FileRefRow(ref, onPreview, onDownload)
+                }
+            }
+
             if (isLast && sending && !message.completed) {
                 Text("▍", color = Accent, fontSize = 13.sp)
+            }
+        }
+    }
+}
+
+@Composable
+private fun FileRefRow(
+    ref: FileRef,
+    onPreview: (FileRef) -> Unit,
+    onDownload: (FileRef) -> Unit
+) {
+    Surface(
+        color = Surface2,
+        shape = RoundedCornerShape(10.dp),
+        border = BorderStroke(1.dp, Border),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 6.dp)
+            .clickable { onPreview(ref) }
+    ) {
+        Row(
+            Modifier.padding(start = 10.dp, top = 6.dp, bottom = 6.dp, end = 2.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                when (ref.kind) {
+                    FileKind.IMAGE -> Icons.Filled.Image
+                    FileKind.TEXT -> Icons.Filled.Description
+                    FileKind.BINARY -> Icons.Filled.AttachFile
+                },
+                contentDescription = null,
+                tint = Accent,
+                modifier = Modifier.size(18.dp)
+            )
+            Spacer(Modifier.width(8.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    ref.name,
+                    color = TextMain,
+                    fontSize = 12.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    ref.path,
+                    color = TextDim,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 9.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            TextButton(
+                onClick = { onPreview(ref) },
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+            ) {
+                Text("Открыть", color = Accent, fontSize = 11.sp)
+            }
+            IconButton(onClick = { onDownload(ref) }, modifier = Modifier.size(38.dp)) {
+                Icon(
+                    Icons.Filled.Download,
+                    contentDescription = "Скачать на телефон",
+                    tint = TextMuted,
+                    modifier = Modifier.size(17.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun FilePreviewDialog(
+    state: FilePreviewState,
+    onClose: () -> Unit,
+    onDownload: () -> Unit
+) {
+    Dialog(
+        onDismissRequest = onClose,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            color = Surface2,
+            shape = RoundedCornerShape(18.dp),
+            modifier = Modifier.fillMaxWidth(0.94f)
+        ) {
+            Column(Modifier.padding(16.dp)) {
+                Text(
+                    state.name,
+                    color = TextMain,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 15.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    state.path,
+                    color = TextDim,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 9.sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(Modifier.height(10.dp))
+
+                when {
+                    state.loading -> Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(
+                            Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                            color = Accent
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text("Загружаю с сервера…", color = TextMuted, fontSize = 12.sp)
+                    }
+                    state.error.isNotBlank() -> Text(
+                        state.error,
+                        color = Red,
+                        fontSize = 12.sp,
+                        lineHeight = 17.sp
+                    )
+                    state.kind == FileKind.IMAGE -> {
+                        val bitmap = remember(state.bytes) {
+                            state.bytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }
+                        }
+                        if (bitmap != null) {
+                            Image(
+                                bitmap.asImageBitmap(),
+                                contentDescription = state.name,
+                                contentScale = ContentScale.Fit,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(max = 420.dp)
+                            )
+                        } else {
+                            Text(
+                                "Не удалось показать изображение. Скачайте файл.",
+                                color = TextMuted,
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+                    state.kind == FileKind.TEXT -> {
+                        SelectionContainer {
+                            Text(
+                                state.text,
+                                color = TextMain,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 11.sp,
+                                lineHeight = 15.sp,
+                                modifier = Modifier
+                                    .heightIn(max = 420.dp)
+                                    .verticalScroll(rememberScrollState())
+                            )
+                        }
+                        if (state.truncated) {
+                            Spacer(Modifier.height(6.dp))
+                            Text("Показано начало файла", color = TextDim, fontSize = 10.sp)
+                        }
+                    }
+                    else -> Text(
+                        "Предпросмотр недоступен. Скачайте файл и откройте его " +
+                            "в подходящем приложении.",
+                        color = TextMuted,
+                        fontSize = 12.sp,
+                        lineHeight = 17.sp
+                    )
+                }
+
+                Spacer(Modifier.height(14.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(onClick = onClose) {
+                        Text("Закрыть", color = TextMuted)
+                    }
+                    Spacer(Modifier.width(6.dp))
+                    TextButton(onClick = onDownload) {
+                        Text("Скачать", color = Accent)
+                    }
+                }
             }
         }
     }

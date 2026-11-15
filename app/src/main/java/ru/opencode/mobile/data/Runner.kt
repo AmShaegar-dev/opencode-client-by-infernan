@@ -48,6 +48,7 @@ object Runner {
         displayMerge()
         cacheParsing()
         serverSignals()
+        fileRefs()
         passwords()
         println()
         println(if (failures == 0) "ALL CHECKS PASSED ($passed)" else "FAILURES: $failures (passed $passed)")
@@ -650,6 +651,51 @@ object Runner {
             ServerSignal.color(web, ServerStatus(error = "Сервер требует пароль OpenCode (401)"))
         )
         eq("signal unknown", ServerSignal.Ssh, ServerSignal.color(tunnel, ServerStatus()))
+    }
+
+    private fun fileRefs() {
+        val quoted = ChatMessage(
+            id = "f1",
+            role = "assistant",
+            text = "Готово: `C:\\tmp\\build\\app-debug.apk` и [сайт](https://example.com/x).",
+            tools = listOf(
+                ToolCall(
+                    "write", "completed",
+                    """{"path":"C:\\tmp\\build\\app-debug.apk","content":"x"}""",
+                    ""
+                )
+            )
+        )
+        val refs = FileRefs.fromMessage(quoted)
+        eq("file refs dedupe", 1, refs.size)
+        eq("file refs name", "app-debug.apk", refs[0].name)
+        eq("file refs kind", FileKind.BINARY, refs[0].kind)
+
+        val relative = ChatMessage(
+            id = "f2",
+            role = "assistant",
+            text = "Отчёт в build/reports/index.md, ссылка https://example.com/a.md",
+            tools = emptyList()
+        )
+        val relativeRefs = FileRefs.fromMessage(relative)
+        eq("relative path found", 1, relativeRefs.size)
+        eq("relative path kept", "build/reports/index.md", relativeRefs[0].path)
+        eq("markdown kind", FileKind.TEXT, relativeRefs[0].kind)
+
+        val uploaded = ChatMessage(
+            id = "f3",
+            role = "user",
+            text = "Файл на сервере: C:\\Users\\admin\\Documents\\Проект по умолчанию\\отчёт.txt"
+        )
+        val uploadedRefs = FileRefs.fromMessage(uploaded)
+        eq("server marker parsed", 1, uploadedRefs.size)
+        eq("server marker spaces", "отчёт.txt", uploadedRefs[0].name)
+
+        val empty = ChatMessage(id = "f4", role = "assistant", text = "https://opencode.ai/v2 версия 1.0.9")
+        eq("no false paths", 0, FileRefs.fromMessage(empty).size)
+
+        eq("image kind", FileKind.IMAGE, FileRefs.kindOf("a/b/photo.PNG"))
+        eq("unknown kind", FileKind.BINARY, FileRefs.kindOf("dist/app.apk"))
     }
 
     private fun passwords() {

@@ -103,7 +103,9 @@ data class SessionInfo(
     val updated: Long,
     val cost: Double,
     val model: ModelRef?,
-    val agent: String?
+    val agent: String?,
+    /** Каталог проекта на сервере: нужен для относительных путей к файлам. */
+    val directory: String = ""
 ) {
     val displayTitle: String get() = title.ifBlank { "Новый чат" }
     val updatedMillis: Long get() = if (updated <= 0) 0L else if (updated < 10_000_000_000L) updated * 1000 else updated
@@ -212,7 +214,8 @@ object ChatJson {
             updated = epochSeconds(time?.opt("updated")),
             cost = o.optDouble("cost", 0.0),
             model = ModelRef.fromJson(o.optJSONObject("model")),
-            agent = o.optString("agent").takeIf { it.isNotBlank() }
+            agent = o.optString("agent").takeIf { it.isNotBlank() },
+            directory = o.optJSONObject("location")?.optString("directory").orEmpty()
         )
     }
 

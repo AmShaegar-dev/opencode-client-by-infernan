@@ -38,6 +38,8 @@ import ru.opencode.mobile.data.ProviderConfig
 import ru.opencode.mobile.data.ProviderConfigV2
 import ru.opencode.mobile.data.ProviderInfo
 import ru.opencode.mobile.data.PromptAttachment
+import ru.opencode.mobile.data.FileKind
+import ru.opencode.mobile.data.FileRef
 import ru.opencode.mobile.data.ServerProfile
 import ru.opencode.mobile.data.ServerStatus
 import ru.opencode.mobile.data.ServersStore
@@ -80,10 +82,24 @@ data class ChatUi(
     val serverId: String = "",
     val sessionId: String = "",
     val title: String = "",
+    /** Каталог проекта на сервере (для относительных путей к файлам). */
+    val directory: String = "",
     val messages: List<ChatMessage> = emptyList(),
     val loading: Boolean = false,
     val sending: Boolean = false,
     val uploading: Boolean = false,
+    val error: String = ""
+)
+
+/** Состояние предпросмотра файла с сервера прямо в чате. */
+data class FilePreviewState(
+    val path: String = "",
+    val name: String = "",
+    val kind: FileKind = FileKind.BINARY,
+    val loading: Boolean = false,
+    val text: String = "",
+    val truncated: Boolean = false,
+    val bytes: ByteArray? = null,
     val error: String = ""
 )
 
@@ -1194,10 +1210,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun loadChat(server: ServerProfile, sessionId: String) {
         chatLoadJob?.cancel()
+        val session = sessions.items.firstOrNull { it.id == sessionId }
         chat = ChatUi(
             serverId = server.id,
             sessionId = sessionId,
-            title = sessions.items.firstOrNull { it.id == sessionId }?.title.orEmpty(),
+            title = session?.title.orEmpty(),
+            directory = session?.directory.orEmpty(),
             loading = true
         )
         // Мгновенно показываем сохранённую историю, пока идёт запрос к серверу.
@@ -1299,6 +1317,101 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     chat = chat.copy(error = humanError(e, "Не удалось обновить сообщения"))
                 }
             }
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Файлы из ответа: предпросмотр и скачивание
+    // ------------------------------------------------------------------
+
+    /** Текущий предпросмотр файла (null — диалог закрыт). */
+    var filePreview by mutableStateOf<FilePreviewState?>(null)
+        private set
+
+    fun previewFile(server: ServerProfile, ref: FileRef) {
+        if (ref.kind == FileKind.BINARY) {
+            filePreview = FilePreviewState(
+                path = ref.path,
+                name = ref.name,
+                kind = ref.kind
+            )
+            return
+        }
+        filePreview = FilePreviewState(
+            path = ref.path,
+            name = ref.name,
+            kind = ref.kind,
+            loading = true
+        )
+        viewModelScope.launch {
+            try {
+                val maxBytes = 3 * 1024 * 1024
+                val data = io { hub.api(server).readFile(ref.path, chat.directory, maxBytes) }
+                filePreview = when (ref.kind) {
+                    FileKind.IMAGE -> FilePreviewState(
+                        path = ref.path,
+                        name = ref.name,
+                        kind = ref.kind,
+                        bytes = data
+                    )
+                    FileKind.TEXT -> {
+                        val full = String(data, Charsets.UTF_8)
+                        val limit = 60_000
+                        FilePreviewState(
+                            path = ref.path,
+                            name = ref.name,
+                            kind = ref.kind,
+                            text = full.take(limit),
+                            truncated = full.length > limit || data.size >= maxBytes
+                        )
+                    }
+                    FileKind.BINARY -> FilePreviewState(
+                        path = ref.path,
+                        name = ref.name,
+                        kind = ref.kind
+                    )
+                }
+            } catch (e: Exception) {
+                filePreview = FilePreviewState(
+                    path = ref.path,
+                    name = ref.name,
+                    kind = ref.kind,
+                    error = humanError(e, "Не удалось открыть файл")
+                )
+            }
+        }
+    }
+
+    fun closeFilePreview() {
+        filePreview = null
+    }
+
+    /**
+     * Скачивает файл с сервера в выбранный документ (SAF). Поток идёт напрямую
+     * в выходной поток, поэтому большие файлы не занимают память целиком.
+     */
+    fun downloadFile(
+        server: ServerProfile,
+        ref: FileRef,
+        uri: Uri,
+        onResult: (Result<String>) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            val result = runCatching {
+                io {
+                    val resolver = getApplication<Application>().contentResolver
+                    hub.api(server).openFileStream(ref.path, chat.directory).use { response ->
+                        val body = response.body ?: error("Сервер вернул пустой файл")
+                        val output = resolver.openOutputStream(uri)
+                            ?: error("Не удалось открыть файл для записи")
+                        java.io.BufferedOutputStream(output).use { out ->
+                            body.byteStream().use { input -> input.copyTo(out) }
+                        }
+                    }
+                }
+                ref.name
+            }
+            onResult(result)
         }
     }
 

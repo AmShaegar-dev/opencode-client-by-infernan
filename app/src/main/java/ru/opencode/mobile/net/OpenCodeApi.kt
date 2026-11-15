@@ -483,6 +483,77 @@ class OpenCodeApi(
     fun exportSession(sessionId: String, sanitize: Boolean = false): String =
         get("/api/experimental/session/${encode(sessionId)}/export?sanitize=$sanitize")
 
+    // ------------------------------------------------------------------
+    // Файлы на сервере
+    // ------------------------------------------------------------------
+
+    /**
+     * Открывает файл через `GET /api/fs/read/<path>`. Для относительных путей
+     * передаётся каталог проекта (`location[directory]`), иначе сервер ищет
+     * файл от каталога своей рабочей области. Поток должен закрыть вызывающий.
+     */
+    fun openFileStream(path: String, directory: String = ""): okhttp3.Response {
+        val base = try {
+            urlProvider().trimEnd('/')
+        } catch (e: Exception) {
+            throw OpenCodeException(0, e.message ?: "Не удалось открыть SSH-туннель")
+        }
+        val normalized = path.replace('\\', '/').trim()
+        val absolute = Regex("^[A-Za-z]:[\\\\/]").containsMatchIn(path) || normalized.startsWith("/")
+        val url = try {
+            (base + "/api/fs/read").toHttpUrl().newBuilder().apply {
+                normalized.trimStart('/').split('/')
+                    .filter { it.isNotEmpty() }
+                    .forEach { addPathSegment(it) }
+                if (!absolute && directory.isNotBlank()) {
+                    addQueryParameter("location[directory]", directory)
+                }
+            }.build()
+        } catch (e: Exception) {
+            throw OpenCodeException(0, "Некорректный путь к файлу: $path")
+        }
+
+        val builder = Request.Builder().url(url).get().header("Accept", "*/*")
+        if (password.isNotEmpty()) {
+            builder.header("Authorization", Credentials.basic("opencode", password))
+        }
+        val response = try {
+            client.newCall(builder.build()).execute()
+        } catch (e: IOException) {
+            throw OpenCodeException(0, networkMessage(e))
+        }
+        if (!response.isSuccessful) {
+            val text = response.body?.string().orEmpty()
+            response.close()
+            throw OpenCodeException(response.code, errorMessage(response.code, text))
+        }
+        return response
+    }
+
+    /** Читает файл целиком; `maxBytes` > 0 ограничивает размер (для предпросмотра). */
+    fun readFile(path: String, directory: String = "", maxBytes: Int = 0): ByteArray =
+        openFileStream(path, directory).use { response ->
+            val body = response.body ?: return@use ByteArray(0)
+            val stream = body.byteStream()
+            if (maxBytes <= 0) {
+                stream.use { it.readBytes() }
+            } else {
+                stream.use { input ->
+                    val buffer = ByteArray(64 * 1024)
+                    val output = java.io.ByteArrayOutputStream()
+                    var total = 0
+                    while (total < maxBytes) {
+                        val read = input.read(buffer, 0, minOf(buffer.size, maxBytes - total))
+                        if (read <= 0) break
+                        output.write(buffer, 0, read)
+                        total += read
+                    }
+                    output.toByteArray()
+                }
+            }
+        }
+
+
     /** Импорт сессии. Возвращает ответ сервера (обычно info+messages). */
     fun importSession(payload: JSONObject): String =
         post("/api/experimental/session/import", payload)
